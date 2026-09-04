@@ -67,7 +67,7 @@ class TrainConfig:
     gate_n: int = 150               # сцен на SHACL-гейт
     gate_every: int = 5             # гейт каждые N эпох и в последнюю (1.5 с/сцену на ядро)
     gate_procs: int = 4             # процессов для гейта
-    log_images: int = 8             # панелей ионограмм из фиксированного набора
+    log_images: int = 48            # максимум панелей ионограмм из фиксированного набора (по станциям)
     images_every: int = 1           # каждые N эпох
     max_steps: int = 0              # dry: шагов в эпохе (0 = все)
     holdout: str = ""               # leave-one-station-out: станция исключается из train
@@ -90,9 +90,14 @@ def load_split(cfg: TrainConfig):
     va = df[df.split == "val"]
     if cfg.holdout:
         tr = tr[tr.station != cfg.holdout]
-    # val-поднабор: поровну по станциям, детерминированно (первые по времени)
+    # val-поднабор: поровну по станциям, равномерно по времени внутри станции (детерминированно)
     n_st = max(1, va.station.nunique())
-    va_sub = va.groupby("station", group_keys=False).head(max(1, cfg.val_size // n_st)).reset_index(drop=True)
+    per = max(1, cfg.val_size // n_st)
+    parts = []
+    for _, g in va.groupby("station"):
+        idx = np.unique(np.linspace(0, len(g) - 1, min(per, len(g))).round().astype(int))
+        parts.append(g.iloc[idx])
+    va_sub = pd.concat(parts).sort_values(["station", "time"]).reset_index(drop=True)
     return df, tr.reset_index(drop=True), va_sub
 
 
@@ -286,9 +291,11 @@ def train(cfg: TrainConfig) -> dict:
           f"{time.time() - t0:.1f} с", flush=True)
     # фиксированный набор логирования (Э3 §3.5) — общий для этапа
     lset = select_logging_set(df[df.split == "val"], ROOT / "runs" / cfg.stage / "logging_set.json")
-    img_rows = df[df.path.isin([im["path"] for im in lset["images"]])].head(cfg.log_images)
+    img_rows = df[df.path.isin([im["path"] for im in lset["images"]])].sort_values(["station", "time"]).head(cfg.log_images)
     Xi, Yi = decode(img_rows, min(cfg.workers, 2))
-    img_titles = [f"{r.station} {str(r.time)[5:16]} {manifest.daynight(r.station, r.time)}" for r in img_rows.itertuples()]
+    img_titles = [f"{r.station} {str(r.time)[5:16]} {manifest.daynight(r.station, r.time)}"
+                  + (" ВОЗМ" if r.disturbed else "") for r in img_rows.itertuples()]
+    img_groups = {st: np.flatnonzero(img_rows.station.values == st) for st in img_rows.station.unique()}
     day_sets = []
     for d in lset["days"]:
         rows = df[(df.station == d["station"]) & (pd.to_datetime(df.time).dt.date.astype(str) == d["date"])].sort_values("time")
@@ -341,7 +348,9 @@ def train(cfg: TrainConfig) -> dict:
         # панели и треки
         if len(Xi) and (ep % cfg.images_every == 0 or ep == cfg.epochs - 1):
             pmi, _ = predict(net, Xi, dev)
-            log.ionograms("images/fixed_set", Xi.numpy(), Yi.numpy(), pmi, ep, titles=img_titles)
+            for st, ix in img_groups.items():          # одна фигура на станцию (Э3 §3.5-а)
+                log.ionograms(f"images/{st}", Xi.numpy()[ix], Yi.numpy()[ix], pmi[ix], ep,
+                              titles=[img_titles[i] for i in ix])
         for d, rows, Xd in day_sets:
             if not len(Xd):
                 continue
