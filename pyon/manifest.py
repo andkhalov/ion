@@ -3,10 +3,14 @@
 manifest.py — опись корпуса: единственная «сборка» вместо тензорных кэшей (Э3 §2.1).
 
 По одной строке на пару (RSF|SBF, SAO): пути, станция, модель зонда, время (из имени
-файла), характеристики ARTIST (foF2, hF, foE, foEs, fxI, M3000F2), C-level, флаг
-возмущённости (описательные буквы F/Q в SAO), сплит train/val (хронологический,
-75/25 внутри станции). Строится за минуты, весит мегабайты; после каждой докачки
-корпуса пересобирать.
+файла), характеристики ARTIST (foF2, hF, foE, foEs, fxI, M3000F2), C-level, местное время
+(`lt_hour`, `daynight` по долготе станции), геомагнитная обстановка суток (GFZ: `Ap`, `Kp_max`,
+`F107` — data/geomag/Kp_ap_Ap_SN_F107_since_1932.txt, CC BY 4.0, Matzka et al. 2021,
+doi:10.5880/Kp.0001), флаги возмущённости: `disturbed_letters` (описательные буквы F/Q в SAO —
+пишет только ARTIST-5; у DPS-4/ARTIST-4 групп букв нет — MO155/JI91J дают 0), `disturbed_geo`
+(Ap ≥ 30 или Kp_max ≥ 5 — сутки с бурей уровня G1+), `disturbed` = любое из двух (Э3 §3.5–3.6);
+сплит train/val (хронологический, 75/25 внутри станции). Строится за секунды–минуты, весит
+мегабайты; после каждой докачки корпуса пересобирать.
 
 Запуск:  python -m pyon.manifest [--procs 8] [--limit N]   (--limit -> data/manifest_smoke.csv)
 Выход:   data/manifest.csv
@@ -61,6 +65,30 @@ def daynight(station: str, t) -> str:
     return "day" if 6 <= lt < 18 else "night"
 
 
+GEOMAG_FILE = ROOT / "data/geomag/Kp_ap_Ap_SN_F107_since_1932.txt"
+AP_STORM, KP_STORM = 30.0, 5.0     # возмущённые сутки: Ap ≥ 30 или max Kp ≥ 5 (G1 по шкале NOAA)
+
+
+def load_geomag(path: Path = GEOMAG_FILE) -> pd.DataFrame | None:
+    """Суточная таблица GFZ → DataFrame(index=date str, columns Ap, Kp_max, F107); None, если файла нет.
+    Формат строки: YYYY MM DD days days_m Bsr dB Kp1..Kp8 ap1..ap8 Ap SN F10.7obs F10.7adj D."""
+    if not Path(path).exists():
+        return None
+    rows = []
+    for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        f = line.split()
+        if len(f) < 27:
+            continue
+        kp = [float(x) for x in f[7:15]]
+        rows.append((f"{int(f[0]):04d}-{int(f[1]):02d}-{int(f[2]):02d}", float(f[23]), max(kp), float(f[25])))
+    df = pd.DataFrame(rows, columns=["date", "Ap", "Kp_max", "F107"]).set_index("date")
+    df.loc[df.Ap < 0, "Ap"] = np.nan          # −1 = нет данных
+    df.loc[df.F107 < 0, "F107"] = np.nan
+    return df
+
+
 def stem_time(stem: str):
     """SSSSS_YYYYDDDHHMMSS → (станция, pd.Timestamp) или None."""
     m = _STEM_RE.match(os.path.basename(stem))
@@ -92,7 +120,9 @@ def _row(f: str):
         row["c_level"] = int(af[9]) if af is not None and len(af) >= 10 else -1
         row["model"] = str(sao.get("system_desc", ""))[:6].strip()          # 'DPS-4 '/'DPS-4D'
         letters = "".join(sao.get("desc_letters", []) or [])
-        row["disturbed"] = int(any(c in letters for c in "FQ"))             # spread-F метки
+        row["disturbed_letters"] = int(any(c in letters for c in "FQ"))     # spread-F метки (ARTIST-5)
+        row["lt_hour"] = round(local_hour(st, t), 2)
+        row["daynight"] = daynight(st, t)
         return row
     except Exception:
         return None
@@ -107,19 +137,33 @@ def build_manifest(procs: int = 8, limit: int = 0) -> pd.DataFrame:
     with Pool(procs) as pool:
         rows = [r for r in pool.imap_unordered(_row, files, chunksize=64) if r is not None]
     df = pd.DataFrame(rows).sort_values(["station", "time"]).reset_index(drop=True)
+    # геомагнитная обстановка суток (GFZ) и итоговый флаг возмущённости
+    geo = load_geomag()
+    dates = pd.to_datetime(df.time).dt.strftime("%Y-%m-%d")
+    if geo is not None:
+        for col in ("Ap", "Kp_max", "F107"):
+            df[col] = dates.map(geo[col]).astype(float).values
+        df["disturbed_geo"] = ((df.Ap >= AP_STORM) | (df.Kp_max >= KP_STORM)).astype(int)
+    else:
+        print("ВНИМАНИЕ: нет data/geomag/Kp_ap_Ap_SN_F107_since_1932.txt — disturbed только по буквам", flush=True)
+        df["Ap"] = df["Kp_max"] = df["F107"] = np.nan
+        df["disturbed_geo"] = 0
+    df["disturbed"] = ((df.disturbed_letters == 1) | (df.disturbed_geo == 1)).astype(int)
     # хронологический сплит 75/25 внутри станции (никаких перемешиваний по времени)
     df["split"] = "train"
     for st, g in df.groupby("station"):
         cut = g.index[int(len(g) * 0.75):]
         df.loc[cut, "split"] = "val"
     print(f"манифест: {len(df)} пар за {time.time()-t0:.0f} с; "
-          f"train {(df.split=='train').sum()} / val {(df.split=='val').sum()}", flush=True)
+          f"train {(df.split=='train').sum()} / val {(df.split=='val').sum()}; "
+          f"станций {df.station.nunique()}, моделей {df.model.nunique()}, возмущённых {df.disturbed.mean():.1%} "
+          f"(буквы {df.disturbed_letters.mean():.1%}, геомагн. {df.disturbed_geo.mean():.1%})", flush=True)
     return df
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--procs", type=int, default=8)
+    ap.add_argument("--procs", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
     df = build_manifest(args.procs, args.limit)

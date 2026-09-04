@@ -31,6 +31,18 @@ def test_manifest_columns_and_split(df_manifest):
     assert (df.model == "DPS-4").all() and df.c_level.between(11, 55).all()
 
 
+def test_geomag_join(df_manifest):
+    """Индексы GFZ: Ap/Kp суток есть в манифесте; 2022-01-01 — спокойные сутки (Ap < 30)."""
+    geo = manifest.load_geomag()
+    if geo is None:
+        pytest.skip("нет data/geomag/Kp_ap_Ap_SN_F107_since_1932.txt")
+    assert {"Ap", "Kp_max", "F107", "disturbed_geo", "disturbed_letters", "disturbed", "daynight", "lt_hour"} <= set(df_manifest.columns)
+    assert geo.loc["2022-01-01", "Ap"] == df_manifest.Ap.iloc[0] and 0 <= df_manifest.Kp_max.iloc[0] <= 9
+    assert df_manifest.disturbed_geo.iloc[0] == int(geo.loc["2022-01-01", "Ap"] >= 30 or geo.loc["2022-01-01", "Kp_max"] >= 5)
+    assert geo.loc["2003-10-29", "Ap"] > 100                            # Halloween storm — санити файла
+    assert set(df_manifest.daynight) <= {"day", "night"}
+
+
 def test_stem_time():
     st, t = manifest.stem_time("PQ052_2019365235959.SAO")
     assert st == "PQ052" and t == pd.Timestamp("2019-12-31 23:59:59")

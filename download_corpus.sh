@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Скачивание обучающего корпуса «сырые ионограммы + SAO» из открытого архива NOAA NCEI.
 # Архив: .../data/<URSI>/<год>/individual/<день>/{ionogram,scaled,image}/
-# Качаем только ionogram/ (RSF/SBF/MMM/16C) и scaled/ (SAO/EDP); image/ и drift/ пропускаем.
+# Качаем только ionogram/ (RSF/SBF/MMM/16C) и scaled/ (SAO); image/, drift/ и EDP-профили пропускаем
+# (EDP нигде в конвейере не используется — профиль NHPC есть в самом SAO; это треть файлов, решение 2026-09-04).
 # Повторный запуск дотягивает только недостающие файлы. Пустые дни пропускаются молча.
 # Портировано с zsh на bash 2026-09-04 (на сервере zsh нет); временные файлы — в local/tmp
 # (правило замкнутости CLAUDE.md §2.9: никаких записей в /tmp).
@@ -24,8 +25,8 @@
 #                                    (EI764-2023, GA762-2024). Оценка: 8 станция-лет, ~60-90 ГБ
 #                                    (у EI764/GA762 с 2020 г. — 192 файла/сутки).
 #   ./download_corpus.sh year ST YYYY — произвольный станция-год (напр. year SMJ67 2010)
-#   PAR=4 RATE=6 ./download_corpus.sh p1 — параллельных загрузок (умолч. 4) и стартов/с (умолч. 6);
-#                                    больше НЕЛЬЗЯ: NOAA отвечает 429 (см. RATE ниже)
+#   PAR=8 RATE=10 ./download_corpus.sh p1 — параллельных загрузок (умолч. 8) и стартов/с (умолч. 10);
+#                                    PAR=16 давал 429 у NOAA (см. RATE ниже)
 # ФАКТЫ (проба 2026-09-05 с локальной машины + проба 2026-09-04 на сервере, research-дисциплина):
 # (1) TR170 (Тромсё, новый код), SO166, KI167, MM168, MG560, SD266, EB040, EA036, AT138,
 #     MO155-2022 — только scaled/. (2) ОПРОВЕРГНУТО «высокоширотных станций с сырьём нет»:
@@ -39,10 +40,11 @@ BASE="https://data.ngdc.noaa.gov/instruments/remote-sensing/active/profilers-sou
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/data/corpus"
 TMPDIR_LOCAL="$HERE/local/tmp"; mkdir -p "$TMPDIR_LOCAL"
-PAR=${PAR:-4}    # параллельных загрузок; RATE — стартов передач в секунду (curl --rate).
-RATE=${RATE:-6}  # ФАКТ 2026-09-04: PAR=16 + параллельный листинг → NOAA отвечает HTTP 429 (лимит
-                 # запросов) на ВСЁ, включая одиночные запросы; после остановки лимит снимается за
-                 # минуты. Держать PAR ≤ 4 и RATE ≤ 6/s; 429 curl повторяет с паузой (--retry-delay).
+PAR=${PAR:-8}         # параллельных загрузок; RATE — стартов передач в секунду (curl --rate).
+RATE=${RATE:-10}      # ФАКТ 2026-09-04: PAR=16 + параллельный листинг 16 потоков → NOAA отвечает HTTP 429
+LIST_PAR=${LIST_PAR:-4}   # на ВСЁ; после остановки лимит снимается за минуты. Замер: PAR=4/RATE=6 дают
+                      # ~9.5 файлов/с (латентность ~0.4 с/файл, не полоса). Листинг дней — LIST_PAR потоков.
+                      # 429 curl повторяет с паузой 20 с (--retry-delay) — самоограничение.
 
 P0=( MO155:2019 JI91J:2022 JR055:2022 PQ052:2022 )
 P2=( MO155:2013 MO155:2014 JI91J:2013 JI91J:2014
@@ -59,7 +61,7 @@ P3=( TR169:2009 TR169:2013
      NO369:2011 YA462:2011 )
 
 list_files() {  # $1 = URL каталога → имена файлов нужных расширений (по строке)
-  curl -sf -m 60 "$1" | grep -o 'href="[A-Za-z0-9_]*\.\(RSF\|SBF\|MMM\|16C\|SAO\|EDP\)"' | sed 's/href="//;s/"$//'
+  curl -sf -m 60 "$1" | grep -o 'href="[A-Za-z0-9_]*\.\(RSF\|SBF\|MMM\|16C\|SAO\)"' | sed 's/href="//;s/"$//'
 }
 
 fetch_day() {   # $1 станция, $2 год, $3 день (001..366) → curl-config недостающих файлов в stdout
@@ -93,7 +95,7 @@ run_year() {    # $1 станция, $2 год
   # листинг дней — параллельно ($PAR процессов): последовательно 2 запроса × ~1.8 с × 365 дней
   # = 20+ мин на станция-год только на листинг (замер 2026-09-04)
   export -f fetch_day list_files; export BASE OUT
-  printf '%s\n' $days | xargs -P "$PAR" -I{} bash -c 'fetch_day "$1" "$2" "$3"' _ "$st" "$yr" {} >> "$tmp"
+  printf '%s\n' $days | xargs -P "$LIST_PAR" -I{} bash -c 'fetch_day "$1" "$2" "$3"' _ "$st" "$yr" {} >> "$tmp"
   echo "  дней в листинге: $(echo "$days" | grep -c .)"
   download "$tmp"; rm -f "$tmp"
   echo "  итого: $(find "$OUT/$st/$yr" -type f 2>/dev/null | wc -l | tr -d ' ') файлов, $(du -sh "$OUT/$st/$yr" 2>/dev/null | cut -f1)"
@@ -101,7 +103,7 @@ run_year() {    # $1 станция, $2 год
 
 case "${1:-p0}" in
   smoke) tmp=$(mktemp "$TMPDIR_LOCAL/curl.XXXXXX"); fetch_day JI91J 2022 002 > "$tmp"; download "$tmp"; rm -f "$tmp"
-         echo "RSF: $(find "$OUT/JI91J/2022/002/ionogram" -name '*.RSF' 2>/dev/null | wc -l | tr -d ' '), SAO: $(find "$OUT/JI91J/2022/002/scaled" -name '*.SAO' 2>/dev/null | wc -l | tr -d ' '), EDP: $(find "$OUT/JI91J/2022/002/scaled" -name '*.EDP' 2>/dev/null | wc -l | tr -d ' ')"; du -sh "$OUT/JI91J/2022/002" ;;
+         echo "RSF: $(find "$OUT/JI91J/2022/002/ionogram" -name '*.RSF' 2>/dev/null | wc -l | tr -d ' '), SAO: $(find "$OUT/JI91J/2022/002/scaled" -name '*.SAO' 2>/dev/null | wc -l | tr -d ' ')"; du -sh "$OUT/JI91J/2022/002" ;;
   p1)    for item in "${P1[@]}"; do run_year "${item%%:*}" "${item##*:}"; done ;;
   p2)    for item in "${P2[@]}"; do run_year "${item%%:*}" "${item##*:}"; done ;;
   p3)    for item in "${P3[@]}"; do run_year "${item%%:*}" "${item##*:}"; done ;;
