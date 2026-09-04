@@ -8,10 +8,12 @@ torch DataLoader по описи data/manifest.csv (см. pyon.manifest); пре
 перекрывает шаг GPU. Требование Э3: суммарная скорость воркеров ≥ 2× скорости шага
 обучения — мерить в dry-прогоне (throughput()).
 
-Датасеты:
-  VerticalDataset  — (RSF|SBF)+SAO → X float32 [2,128,128] (амплитуда над медианой+6 дБ),
-                     Y int64 [128,128] (BG/F2/F1/E/Es из полилиний ARTIST).
-  ObliqueDataset   — SAO → синтетическая НЗ-маска int64 [128,128] (классы OB_CLASSES)
+Датасеты (тензоры отдаются КОМПАКТНЫМИ — uint8/int8: через IPC воркер→главный процесс
+идёт в 5 раз меньше байт, чем float32/int64; в тренировочном цикле на GPU:
+`x = x.to(dev).float().div_(255)`, `y = y.to(dev).long()` — замер E0 2026-09-04, 4 CPU):
+  VerticalDataset  — (RSF|SBF)+SAO → X uint8 [2,128,128] (амплитуда над медианой+6 дБ,
+                     0..24 дБ → 0..255), Y int8 [128,128] (BG/F2/F1/E/Es из полилиний ARTIST).
+  ObliqueDataset   — SAO → синтетическая НЗ-маска int8 [128,128] (классы OB_CLASSES)
                      сферическим секансом; дальность D — случайная из d_set на каждый
                      показ (fixed_d — для валидации); component: "O" | "X".
                      «Сырьё» для НЗ порождает рендерер на GPU уже В батче — тут только маски.
@@ -52,13 +54,13 @@ class VerticalDataset(Dataset):
 
     def __getitem__(self, i: int):
         try:
-            x = dfm.read_canon(str(ROOT / self.paths[i])).astype(np.float32) / 255.0
-            y = masks_from_sao(dfm.read_sao(str(ROOT / self.saos[i]))).astype(np.int64)
+            x = np.ascontiguousarray(dfm.read_canon(str(ROOT / self.paths[i])), dtype=np.uint8)
+            y = np.ascontiguousarray(masks_from_sao(dfm.read_sao(str(ROOT / self.saos[i]))), dtype=np.int8)
         except Exception:
             # битый файл не должен ронять эпоху: отдаём пустой образец (фон),
             # доля таких — метрика санити E0 (логировать в TensorBoard)
-            x = np.zeros((2, 128, 128), np.float32)
-            y = np.zeros((128, 128), np.int64)
+            x = np.zeros((2, 128, 128), np.uint8)
+            y = np.zeros((128, 128), np.int8)
         return torch.from_numpy(x), torch.from_numpy(y)
 
 
@@ -88,7 +90,7 @@ class ObliqueDataset(Dataset):
             muf_mh = lab.get("muf_MH", np.nan)
         except Exception:
             y, muf_f2, muf_mh = np.zeros((obs.NP, obs.NF), np.int8), np.nan, np.nan
-        return (torch.from_numpy(y.astype(np.int64)), torch.tensor(d),
+        return (torch.from_numpy(np.ascontiguousarray(y, dtype=np.int8)), torch.tensor(d),
                 torch.tensor(float(muf_f2)), torch.tensor(float(muf_mh)))
 
 
