@@ -81,14 +81,15 @@ download() {    # $1 = curl-config файл
 }
 
 run_year() {    # $1 станция, $2 год
-  local st=$1 yr=$2 tmp days dd
+  local st=$1 yr=$2 tmp days
   tmp=$(mktemp "$TMPDIR_LOCAL/curl.XXXXXX")
   echo "=== $st $yr"
   days=$(curl -sf -m 60 "$BASE/$st/$yr/individual/" | grep -o 'href="[0-9][0-9][0-9]/"' | tr -dc '0-9\n')
-  while read -r dd; do
-    [[ -z "$dd" ]] && continue
-    fetch_day "$st" "$yr" "$dd"
-  done <<< "$days" >> "$tmp"
+  # листинг дней — параллельно ($PAR процессов): последовательно 2 запроса × ~1.8 с × 365 дней
+  # = 20+ мин на станция-год только на листинг (замер 2026-09-04)
+  export -f fetch_day list_files; export BASE OUT
+  printf '%s\n' $days | xargs -P "$PAR" -I{} bash -c 'fetch_day "$1" "$2" "$3"' _ "$st" "$yr" {} >> "$tmp"
+  echo "  дней в листинге: $(echo "$days" | grep -c .)"
   download "$tmp"; rm -f "$tmp"
   echo "  итого: $(find "$OUT/$st/$yr" -type f 2>/dev/null | wc -l | tr -d ' ') файлов, $(du -sh "$OUT/$st/$yr" 2>/dev/null | cut -f1)"
 }
