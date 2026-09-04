@@ -14,3 +14,4 @@ tensorboard==2.20.0
 requests==2.32.3
 pytest>=8.0              # tests/ (создаёт серверный агент, CLAUDE.md §2.6)
 jupyter; python_version >= "3.10"   # только для просмотра прототипных ноутбуков
+setuptools<80           # tensorboard 2.20 импортирует pkg_resources (снят в setuptools>=80)

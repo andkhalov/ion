@@ -23,7 +23,8 @@ softplus_β(v) = −(1/β)·log σ(−βv), β = 2 (продукт-t-норма)
                        P4 порядок частот foE<foF1<foF2 (Q1; Es исключён — ревью Ф-01)
   НЗ, oblique_logic:   S1 МПЧ(2F2) ≤ МПЧ(1F2) (форма S1; 0.02), S2 P′(2F2) ≥ P′(1F2)+150 км (S2),
                        P2 связность (3 строки)
-Возвращают (total, components) — покомпонентный L_logic для TensorBoard (Э3 §3.3).
+Возвращают (total: скаляр, components: {имя: Tensor[B]}) — покомпонентный и пообразцовый
+L_logic для TensorBoard (Э3 §3.3: скаляры по компонентам, гистограмма распределения).
 """
 from __future__ import annotations
 
@@ -74,12 +75,16 @@ def soft_readouts(logits: torch.Tensor, pos_axis):
 def pairwise_ratio_penalty(logits, ci: int, pos_axis, ratio: float, scale: float, pen,
                            detach_support: bool = True):
     """Штраф «в столбце нет пары масс класса ci на положениях h < h′ с h′ > ratio·h»:
-    Σ_{h,h′} q(h)·q(h′)·pen((h′ − ratio·h)/scale) / MASS0² → [B, F]. Опора q(h) детачится."""
+    Σ_{h,h′} q(h)·q(h′)·pen((h′ − ratio·h)/scale) / (Σ_h q(h))² → [B, F] — средний штраф по
+    паре пикселей класса в столбце (ограничен max pen; у необученной сети с размазанной массой
+    не взрывается). Опора q(h) и знаменатель детачатся: градиент только вниз на верхнюю массу
+    (нарушителя), «разбавить» знаменатель фантомной массой нельзя."""
     q = logits.softmax(1)[:, ci]                                     # [B, H, F]
     pa = torch.as_tensor(pos_axis, dtype=logits.dtype, device=logits.device)
     M = pen((pa.view(1, -1) - ratio * pa.view(-1, 1)) / scale)      # [H(h), H(h′)]
     q_sup = q.detach() if detach_support else q
-    return torch.einsum("bhf,hk,bkf->bf", q_sup, M, q) / (MASS0 ** 2)
+    mass2 = (q_sup.sum(1) ** 2 + 1e-6)                               # [B, F], детачен вместе с q_sup
+    return torch.einsum("bhf,hk,bkf->bf", q_sup, M, q) / mass2
 
 
 def continuity(pres, pos_soft, gap: float, scale: float, pen):
@@ -105,7 +110,7 @@ def vertical_logic(logits: torch.Tensor, variant: str = "hinge", detach_support:
     P2 = continuity(pres, h_soft, gap=60.0, scale=100.0, pen=pen)
     # P3 (не-кратник, форма V3), парное заземление (ревизия 2026-09-04, Э2 §4-bis.4):
     # в столбце f нет двух масс F2 на высотах h < h′ с h′ > 1.8·h:
-    #   P3(f) = Σ_{h,h′} q(h)·q(h′)·relu(h′ − 1.8·h)/100 / MASS0²,  опора q(h) детачится.
+    #   P3(f) = Σ_{h,h′} q(h)·q(h′)·relu(h′ − 1.8·h)/100 / (Σq)²,  опора q(h) и знаменатель детачатся.
     # Почему не прототипный soft-argmax + min по столбцам: (а) на ВЗ кратник лежит в ТЕХ ЖЕ
     # столбцах, что основной след — среднее по столбцу уходило в середину и P3 его не видел;
     # (б) min по всем столбцам брал псевдовысоту остаточной массы softmax в пустых столбцах.
@@ -119,8 +124,8 @@ def vertical_logic(logits: torch.Tensor, variant: str = "hinge", detach_support:
         return order_penalty(fmax[:, i[lo]], fmax[:, i[hi]], 0.01, pen, True)
 
     P4 = g("E", "F2") * fp("E", "F2") + g("E", "F1") * fp("E", "F1") + g("F1", "F2") * fp("F1", "F2")
-    comps = {"P1": P1.mean(), "P2": P2.mean(), "P3": P3.mean(), "P4": P4.mean()}
-    return sum(comps.values()), comps
+    comps = {"P1": P1, "P2": P2, "P3": P3, "P4": P4}                  # каждый — [B] (по образцам)
+    return sum(c.mean() for c in comps.values()), comps
 
 
 def oblique_logic(logits: torch.Tensor, variant: str = "lognorm", detach_support: bool = True):
@@ -135,8 +140,8 @@ def oblique_logic(logits: torch.Tensor, variant: str = "lognorm", detach_support
     # S2: P′(MH) ≥ P′(F2) + 150 км  ⇔  −P′(MH) ≤ −P′(F2) − margin — нарушитель MH, опора F2
     S2 = g * order_penalty(-d_mean[:, iMH], -d_mean[:, iF2], 150.0 / (obs.P_MAX - obs.P_MIN), pen, detach_support)
     P2 = continuity(pres, d_soft, gap=3.0 / obs.NP, scale=1.0, pen=pen)
-    comps = {"S1": S1.mean(), "S2": S2.mean(), "P2": P2.mean()}
-    return sum(comps.values()), comps
+    comps = {"S1": S1, "S2": S2, "P2": P2}                            # каждый — [B]
+    return sum(c.mean() for c in comps.values()), comps
 
 
 def logits_from_mask(mask, n_classes: int, scale: float = 30.0) -> torch.Tensor:

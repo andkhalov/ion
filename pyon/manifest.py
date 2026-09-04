@@ -31,6 +31,10 @@ from pyon import digi_formats as dfm           # noqa: E402
 
 SCALED_KEYS = ["foF2", "foF1", "hF", "foE", "foEs", "fxI", "M3000F2", "fmin"]
 _STEM_RE = re.compile(r"([A-Z0-9]{5})_(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})")
+# координаты станций корпуса (широта, долгота E) — для местного времени/день-ночь (Э3 §3.6)
+STATIONS = {"JI91J": (-12.0, 283.2), "RO041": (41.8, 12.5), "MO155": (55.5, 37.3), "JR055": (54.6, 13.4),
+            "PQ052": (50.0, 14.6), "EI764": (64.7, 212.9), "GA762": (62.4, 214.8), "TR169": (69.6, 19.2),
+            "NO369": (69.4, 88.1), "YA462": (62.0, 129.6), "SMJ67": (67.0, 309.4)}
 RAW_PATTERNS = ["data/corpus/*/*/*/ionogram/*.RSF", "data/corpus/*/*/*/ionogram/*.SBF",
                 "data/RSF-samples-w-img-n-sao-n-dft/ionogram/*.RSF",
                 "data/SBF-samples-w-img-n-sao/ionogram/*.SBF"]
@@ -39,6 +43,22 @@ RAW_PATTERNS = ["data/corpus/*/*/*/ionogram/*.RSF", "data/corpus/*/*/*/ionogram/
 def collect_files() -> list[str]:
     """Все сырые файлы корпуса и образцов (отсортированный список абсолютных путей)."""
     return sorted({f for pat in RAW_PATTERNS for f in glob.glob(str(ROOT / pat))})
+
+
+def local_hour(station: str, t) -> float:
+    """Местное солнечное время (ч) по долготе станции; NaN для неизвестной станции."""
+    if station not in STATIONS:
+        return float("nan")
+    t = pd.Timestamp(t)
+    return (t.hour + t.minute / 60 + STATIONS[station][1] / 15.0) % 24
+
+
+def daynight(station: str, t) -> str:
+    """'day' (6 ≤ LT < 18) | 'night' | 'unknown' — стратификация Э3 §3.6."""
+    lt = local_hour(station, t)
+    if not np.isfinite(lt):
+        return "unknown"
+    return "day" if 6 <= lt < 18 else "night"
 
 
 def stem_time(stem: str):

@@ -85,9 +85,34 @@ def oblique_scene(pm: np.ndarray, name: str) -> Graph:
     return g
 
 
-def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g"):
-    """Доля масок, чья сцена даёт sh:Violation, и флаги по маскам (True = нарушение)."""
-    vocab = vocab if vocab is not None else vd.load_vocabulary()
-    flags = [bool(vd.validate_scene(scene_fn(pm, f"{prefix}{k}"), vocab, verbose=False)["violations"])
-             for k, pm in enumerate(masks)]
-    return (sum(flags) / len(flags) if flags else float("nan")), flags
+_VOCAB: Graph | None = None
+
+
+def _worker_init():
+    global _VOCAB
+    _VOCAB = vd.load_vocabulary()
+
+
+def _check(args):
+    scene_kind, pm, name = args
+    fn = vertical_scene if scene_kind == "vertical" else oblique_scene
+    return bool(vd.validate_scene(fn(pm, name), _VOCAB, verbose=False)["violations"])
+
+
+def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g", procs: int = 1):
+    """Доля масок, чья сцена даёт sh:Violation, и флаги по маскам (True = нарушение).
+    procs > 1 — пул процессов (каждый грузит словарь один раз): ~1.5 с/сцену на ядро
+    (owlrl-замыкание + 3 прогона pyshacl), на 4 ядрах ×3.5 (замер 2026-09-04)."""
+    masks = list(masks)
+    if not masks:
+        return float("nan"), []
+    if procs > 1:
+        from multiprocessing import get_context
+        kind = "vertical" if scene_fn is vertical_scene else "oblique"
+        with get_context("fork").Pool(procs, initializer=_worker_init) as pool:
+            flags = pool.map(_check, [(kind, pm, f"{prefix}{k}") for k, pm in enumerate(masks)], chunksize=4)
+    else:
+        vocab = vocab if vocab is not None else vd.load_vocabulary()
+        flags = [bool(vd.validate_scene(scene_fn(pm, f"{prefix}{k}"), vocab, verbose=False)["violations"])
+                 for k, pm in enumerate(masks)]
+    return sum(flags) / len(flags), flags

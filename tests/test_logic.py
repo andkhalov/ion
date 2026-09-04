@@ -32,7 +32,7 @@ def _good_vertical():
 
 def _comps(mask, variant="hinge", fn=logic.vertical_logic):
     total, comps = fn(logic.logits_from_mask(mask[None], NC if fn is logic.vertical_logic else len(obs.OB_CLASSES), SCALE), variant)
-    return float(total), {k: float(v) for k, v in comps.items()}
+    return float(total), {k: float(v.mean()) for k, v in comps.items()}
 
 
 @pytest.mark.parametrize("variant", ["hinge", "lognorm"])
@@ -53,11 +53,11 @@ def test_p3_fires_on_multiple_labelled_as_f2():
     good = np.zeros((canon.NH, canon.NF), np.int8); _band(good, F2, 2.0, 6.0, 250.0)
     bad = good.copy(); _band(bad, F2, 2.0, 9.0, 500.0)               # кратник 2F2 размечен как F2
     g, b = _comps(good)[1], _comps(bad)[1]
-    assert g["P3"] < 0.02 and b["P3"] > g["P3"] + 0.1
+    assert g["P3"] < 0.02 and b["P3"] > g["P3"] + 0.02
     # кратник ТОЛЬКО в столбцах основного следа (2–6 МГц): прототипный soft-argmax усреднял его с
     # основным следом и был слеп; заземление через max столбца (ревизия 2026-09-04) — видит
     bad2 = good.copy(); _band(bad2, F2, 2.0, 6.0, 500.0)
-    assert _comps(bad2)[1]["P3"] > g["P3"] + 0.1
+    assert _comps(bad2)[1]["P3"] > g["P3"] + 0.02
 
 
 def test_p4_fires_when_foe_above_fof2():
@@ -105,7 +105,7 @@ def test_presence_gates_are_detached():
     gate = (present[:, E - 1] * present[:, F2 - 1])
     assert gate.requires_grad                                            # сам по себе дифференцируем
     total, comps = logic.vertical_logic(lg, "hinge")
-    comps["P1"].backward()
+    comps["P1"].mean().backward()
     assert torch.isfinite(lg.grad).all() and lg.grad.abs().sum() > 0
 
 

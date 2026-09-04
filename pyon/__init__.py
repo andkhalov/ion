@@ -22,7 +22,11 @@ pyon — библиотека проекта «Нейросимвольная и
   pyon.models         — U-Net (перенос из iono_study.ipynb)
   pyon.logic          — логическая голова: релаксации P1–P4 (ВЗ) и S1/S2/P2 (НЗ), правила детача
   pyon.gates          — SHACL-гейт на инференсе: маска → сцена → validate_scene; gate_rate
-  (E1/E4, ещё нет)    — pyon.renderer (нейрорендерер шума), pyon.training, pyon.tblog
+  pyon.training       — тренировочный цикл ВЗ (E1): AMP, метрики Э3 §3 со стратификацией,
+                        SHACL-гейт по расписанию, фиксированные наборы логирования, артефакты runs/
+  pyon.tblog          — TensorBoard (порт 13133): скаляры/metrics.csv, панели ионограмм,
+                        суточные треки, гистограммы
+  (E4, ещё нет)       — pyon.renderer (нейрорендерер шума)
 
 Тесты: tests/ (pytest; `.venv/bin/python -m pytest tests -q`) — парсеры на образцах, физика,
 логика, гейт, лоадер; запускать перед каждым full-прогоном (CLAUDE.md §2.6).
