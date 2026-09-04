@@ -1,0 +1,103 @@
+@prefix iono: <http://scilibai.ru/onto/iono#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# =====================================================================
+#  iono-shapes-vs.ttl — ФОРМЫ ВЕРТИКАЛЬНОГО ЗОНДИРОВАНИЯ (V3–V4), 0.2.0
+#
+#  0.2.0 (по ревью 2026-09-03):
+#  - таргет — iono:VerticalIonogram, НЕ все ионограммы (Ф-11/Ч-01/T-03:
+#    на НЗ кратность не даёт кратной задержки — P = √(D²+(2nh)²) — и
+#    прежняя V3 роняла корректные НЗ-сцены, включая эталон ground-A);
+#    класс выводится ризонером из producedBy VerticalSounding либо
+#    типизируется в данных напрямую;
+#  - V3: допуск ±12 % заменён асимметричным абсолютным (Ф-12: при ВЗ
+#    h′_n = n·h′_1 ТОЧНО — [РД2023] §6.5.1.3, с. 52 печ.; посылка о
+#    «дополнительном запаздывании кратника» неверна; смещение даёт
+#    аппаратная нулевая задержка t₀, и оно отрицательное);
+#  - V4: приближение fx − fo ≈ fB/2 заменено точным соотношением
+#    fo² = fx·(fx − fB) (Ф-03/Ф-13; выражается без sqrt), допуск
+#    ±0,3 МГц отнесён к fo; добавлено предупреждение V4w об
+#    отсутствующей гирочастоте;
+#  - объявление hasGyroFrequency перенесено в iono-observation.ttl
+#    (М-14/Ч-05 — T-Box не место в файле форм);
+#  - сравнения защищены BIND(xsd:decimal(STR(…))) (T-01).
+#  Копия для прототипа обучения — modules/onto/iono-shapes-vs.ttl.
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/shapes-vs> a owl:Ontology ;
+    rdfs:label "SHACL-формы вертикального зондирования (V3–V4)"@ru ;
+    dcterms:source "[РД2023], §6.5.1.3; физика O/X: fo² = fx(fx − fB)" ;
+    owl:versionInfo "0.2.0-prototype" .
+
+iono:IonogramVSShape a sh:NodeShape ;
+    sh:targetClass iono:VerticalIonogram ;
+    sh:severity sh:Violation ;
+    rdfs:label "Ограничения вертикального зондирования (V3, V4)"@ru ;
+
+    # V3. Кратник: при ВЗ h′_n(f) = n·h′_1(f) точно ([РД2023] §6.5.1.3).
+    # Допуск асимметричный: вверх +0,13 мс (~20 км h′ — ошибка снятия),
+    # вниз −0,26 мс (та же ошибка + аппаратная нулевая задержка t₀,
+    # смещающая d_n = n(d₁−t₀)+t₀ ниже кратного). Смешанные эхо (M/N)
+    # в допуск НЕ укладываются и должны отсеиваться как отдельный класс.
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "V3: задержка кратника {?m2} не кратна задержке основного следа {?m1} (ВЗ: h′_n = n·h′_1)"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?m1 ?m2 WHERE {
+              ?t1 iono:isTraceIn $this ; iono:denotes ?m1 .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?m2 .
+              ?m1 iono:hasHopCount 1 ; iono:hasMinDelayValue ?r1 ;
+                  iono:reflectsFromLayer ?L ; iono:hasMagnetoionicComponent ?c .
+              ?m2 iono:hasHopCount ?n2 ; iono:hasMinDelayValue ?r2 ;
+                  iono:reflectsFromLayer ?L ; iono:hasMagnetoionicComponent ?c .
+              FILTER (?n2 > 1)
+              BIND (xsd:decimal(STR(?r1)) AS ?d1) BIND (xsd:decimal(STR(?r2)) AS ?d2)
+              BIND (?d2 - ?n2 * ?d1 AS ?dd)
+              FILTER (?dd > 0.13 || ?dd < -0.26)
+            }
+        """ ] ;
+
+    # V4. O/X-пара одного слоя и кратности: точное соотношение
+    # fo² = fx·(fx − fB), допуск ±0,3 МГц по fo (Ф-13). Верно при любых
+    # fo, включая fo ~ fB (ночная foF2, foE), где приближение fB/2 лжёт.
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "V4: O/X-пара {?mo}/{?mx} не согласуется с гирочастотой (fo² = fx(fx − fB) ± 0,3 МГц по fo)"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?mo ?mx WHERE {
+              $this iono:hasGyroFrequency ?rfh .
+              ?t1 iono:isTraceIn $this ; iono:denotes ?mo .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?mx .
+              ?mo iono:hasMagnetoionicComponent iono:ordinary ;
+                  iono:hasHopCount ?n ; iono:reflectsFromLayer ?L ; iono:hasMOFValue ?rfo .
+              ?mx iono:hasMagnetoionicComponent iono:extraordinary ;
+                  iono:hasHopCount ?n ; iono:reflectsFromLayer ?L ; iono:hasMOFValue ?rfx .
+              BIND (xsd:decimal(STR(?rfh)) AS ?fh) BIND (xsd:decimal(STR(?rfo)) AS ?fo)
+              BIND (xsd:decimal(STR(?rfx)) AS ?fx)
+              BIND (?fx * (?fx - ?fh) AS ?p)
+              FILTER ( ?p < (?fo - 0.3) * (?fo - 0.3) || ?p > (?fo + 0.3) * (?fo + 0.3) )
+            }
+        """ ] .
+
+iono:IonogramVSGyroShape a sh:NodeShape ;
+    sh:targetClass iono:VerticalIonogram ;
+    sh:severity sh:Warning ;
+    rdfs:label "V4w: O/X-пара без гирочастоты не проверяется"@ru ;
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "V4w: на ионограмме есть O/X-пара, но не задана hasGyroFrequency — форма V4 молчит"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this WHERE {
+              FILTER NOT EXISTS { $this iono:hasGyroFrequency ?fh }
+              ?t1 iono:isTraceIn $this ; iono:denotes ?mo .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?mx .
+              ?mo iono:hasMagnetoionicComponent iono:ordinary ; iono:reflectsFromLayer ?L .
+              ?mx iono:hasMagnetoionicComponent iono:extraordinary ; iono:reflectsFromLayer ?L .
+            }
+        """ ] .
+
+iono: sh:declare [ sh:prefix "iono" ; sh:namespace "http://scilibai.ru/onto/iono#"^^xsd:anyURI ] .

@@ -1,0 +1,94 @@
+@prefix iono:    <http://scilibai.ru/onto/iono#> .
+@prefix obo:  <http://purl.obolibrary.org/obo/> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# =====================================================================
+#  iono-es.ttl — МОДУЛЬ ТИПОЛОГИИ СПОРАДИЧЕСКОГО СЛОЯ Es (0.2.0)
+#
+#  [РД2023], §6.5.2 (с. 54–57 печ., рис. 15 на с. 58): описаны
+#  восемь типов прозой (c, h, l, f, r, a, s, q); код ИОНКА (§6.6.1,
+#  табл. 4, группа 12) кодирует ДЕВЯТЬ: 1=f 2=l 3=c 4=h 5=q 6=r 7=a 8=s
+#  9=«не классифицируется» (= тип n), 0=нет данных (Ф-31). Полный набор
+#  из одиннадцати — URSI Handbook [UAG23A], §4.83 (с. 4-21): девять
+#  стандартных f, l, c, h, q, r, a, s, d + k (particle E) + n.
+#
+#  Тип Es — признак СЛЕДА на ионограмме (вид следа), а не процесса:
+#  0.2.0 домен hasEsType сменён на IonogramTrace (М-04); привязка к
+#  моде — через denotes. Эвристики распознавания — в комментариях,
+#  НЕ аксиомы (это распознавание, а не определение).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/es> a owl:Ontology ;
+    rdfs:label "Модуль типологии Es"@ru ;
+    owl:imports <http://scilibai.ru/onto/iono> ;
+    dcterms:source "[РД2023], §6.5.2, §6.6.1 (табл. 4), §6.6.5; URSI Handbook [UAG23A], §4.8" ;
+        rdfs:comment """Ключи источников в аннотациях: [РД2023] = РД 52.26.817–2023 «Проведение наблюдений за ионосферой...» (Росгидромет; печатная страница = страница PDF − 10); [UAG23A] = Piggott W.R., Rawer K. URSI Handbook of Ionogram Interpretation and Reduction, Rep. UAG-23A, NOAA, 1978; [Щирый2007] = Щирый А.О., дисс. канд. техн. наук, СПб., 2007; [ЛС2026] = Литвинов В.Л., Скрипачев В.О., монография по ионосферному зондированию, 2026; [Davies1990] = Davies K. Ionospheric Radio. IET, 1990; [SAO43] = SAO 4.3 (ulcar.uml.edu/~iag/SAO-4.3.htm); [ArpSmithSpear2015] = Arp R., Smith B., Spear A.D. Building Ontologies with BFO. MIT Press, 2015. Идентификаторы вида М-xx/Ф-xx/Ч-xx/T-xx/С-xx — находки пяти независимых ревью онтологии (методология/физика/читатель/техника/сверка источников, 2026-09-03; протокол решений — research/05-shiryi-merge.md)."""@ru ;
+    owl:versionInfo "0.2.0-prototype" .
+
+iono:EsType a owl:Class ;
+    rdfs:label "Тип спорадического слоя Es"@ru, "Es type"@en ;
+    rdfs:comment "Категория классификации СЛЕДА отражений от Es по его форме (информационное обозначение). Классификация независима от правил снятия foEs/h'Es/fbEs ([UAG23A] §4.81) — типы слабых/наклонных отражений записываются, даже если численно не снимаются."@ru .
+
+iono:hasEsType a owl:ObjectProperty ;
+    rdfs:domain iono:IonogramTrace ; rdfs:range iono:EsType ;
+    rdfs:label "имеет тип Es"@ru, "has Es type"@en ;
+    rdfs:comment "0.2.0: домен — след (М-04: все определения типов — геометрия следа; прежний домен PropagationMode типизировал корректно размеченный след как процесс). Табуляция: первым пишется тип следа, по которому определена foEs ([UAG23A] §4.82) — [РД2023] §6.6.5 (с. 88–89 печ.) говорит «по которому определяется fbEs»; РАСХОЖДЕНИЕ ИСТОЧНИКОВ зафиксировано (С-23), проект следует UAG. До трёх типов в суточной записи, третий — без кратности."@ru .
+
+iono:esTypeSymbol a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:EsType ; rdfs:range xsd:string ; rdfs:label "буква типа"@ru, "Es type symbol"@en .
+
+iono:esTypeIonkaDigit a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:EsType ; rdfs:range xsd:integer ;
+    rdfs:label "цифра типа в коде ИОНКА"@ru, "Es type IONKA digit"@en ;
+    rdfs:comment "РД §6.6.1, табл. 4, группа 12: 1=f 2=l 3=c 4=h 5=q 6=r 7=a 8=s 9=n(не классифицируется); 0=нет данных. Типы d и k в коде ИОНКА не представлены (Ф-31)."@ru .
+
+iono:esTraceCount a owl:DatatypeProperty ;
+    rdfs:domain iono:IonogramTrace ; rdfs:range xsd:integer ;
+    rdfs:label "число следов данного типа (кратность в табуляции, до 9)"@ru, "Es trace count"@en ;
+    rdfs:comment "[UAG23A] §4.82: у первых двух табулируемых типов обязательна кратность; определяется по зондированию с нормальным усилением (Ф-32)."@ru .
+
+# --- восемь типов, описанных в РД ---
+iono:EsT_c a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "c" ; iono:esTypeIonkaDigit 3 ;
+    rdfs:label "c (cusp) — пикообразный, с перегибом"@ru, "Es type c (cusp)"@en ;
+    rdfs:comment "След Es, слившийся с отражениями регулярного E, с симметричным перегибом НА ИЛИ НИЖЕ foE (различитель от h — Ф-26); при большом отклоняющем поглощении перегиб может отсутствовать. Часто мешает определению foE (буквы A/R). [РД2023] §6.5.2.2, рис. 10."@ru .
+iono:EsT_h a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "h" ; iono:esTypeIonkaDigit 4 ;
+    rdfs:label "h (high) — высокий"@ru, "Es type h (high)"@en ;
+    rdfs:comment "Скачок ДЕЙСТВУЮЩЕЙ ВЫСОТЫ на частоте на или выше foE: начало следа Es лежит выше конца следа E (обычно ≥ ~10 км, [UAG23A] §4.85); загибы E и Es несимметричны; точность foE не ухудшается. НЕ путать с частотным разрывом §6.5.5.5 (0,3–0,5 МГц) — то правило о точности foEs/fbEs, а не о типе h (Ф-26). [РД2023] §6.5.2.3, рис. 11."@ru .
+iono:EsT_l a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "l" ; iono:esTypeIonkaDigit 2 ;
+    rdfs:label "l (low) — низкий"@ru, "Es type l (low)"@en ;
+    rdfs:comment "Es НА УРОВНЕ ИЛИ НИЖЕ минимальной действующей высоты регулярной области E (дневной, толстая E) — либо ниже h′ корпускулярного слоя E (ночной высокоширотный вариант, [UAG23A]; Ф-30). [РД2023] §6.5.2.4, рис. 12."@ru .
+iono:EsT_f a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "f" ; iono:esTypeIonkaDigit 1 ;
+    rdfs:label "f (flat) — плоский"@ru, "Es type f (flat)"@en ;
+    rdfs:comment "Высота не растёт с частотой; широкий след с чёткими краями; структурно близок к l, но ночной (нет регулярного E). Обычно даёт кратники и экранирует (различитель от a — Ф-29). [РД2023] §6.5.2.5, рис. 13."@ru .
+iono:EsT_r a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "r" ; iono:esTypeIonkaDigit 6 ;
+    rdfs:label "r (retardation) — с запаздыванием"@ru, "Es type r (retardation)"@en ;
+    rdfs:comment "Рост действующей высоты у высокочастотного конца (групповое запаздывание в Es, не наблюдаемое на тех же частотах в F). [РД2023] §6.5.2.6, рис. 14."@ru .
+iono:EsT_a a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "a" ; iono:esTypeIonkaDigit 7 ;
+    rdfs:label "a (auroral) — авроральный"@ru, "Es type a (auroral)"@en ;
+    rdfs:comment "Ночной; сопровождает магнитную активность и сияния; плоский/постепенно растущий нижний край, расслоения и рассеяние над ним (размытая часть до сотен км). Различители ([UAG23A] §4.83/4.85, Ф-29): обусловлен наклонными отражениями, поэтому кратников почти не даёт; максимум размытия ниже foEs (часто у fminF); при высоком поглощении отличается от f ростом размытия с усилением; f/h/c могут накладываться на a. [РД2023] §6.5.2.7, рис. 15."@ru .
+iono:EsT_s a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "s" ; iono:esTypeIonkaDigit 8 ;
+    rdfs:label "s (slanting) — косой"@ru, "Es type s (slant)"@en ;
+    rdfs:comment "Равномерно поднимающийся размытый след; может выходить из foE, fxE, foEs, fxEs или промежуточной точки следа Es; классифицируется ТОЛЬКО восходящая часть (горизонтальная — отдельно). ЗАПРЕТ [UAG23A] §4.83: «следы типа s НЕ ДОЛЖНЫ использоваться для определения foEs, fbEs или h′Es» — источник систематического завышения foEs автоскейлерами (Ф-27). Связан с лакуной ([UAG23A] §2.75). [РД2023] §6.5.2.8."@ru .
+iono:EsT_q a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "q" ; iono:esTypeIonkaDigit 5 ;
+    rdfs:label "q (equatorial) — экваториальный"@ru, "Es type q (equatorial)"@en ;
+    rdfs:comment "Дневной; зона НАИБОЛЬШЕЙ ВЕРОЯТНОСТИ — полоса ~1200 км (±5° магн. широты) вдоль экватора, крайне редок вне ±15° ([UAG23A] §4.85); возбуждается электроджетом; диффузен, чистый q почти прозрачен (не экранирует), но на НЧ-конце может накладываться экранирующий Es-l (комбинация q1l1) — Ф-28. Ожидаем у Jicamarca. [РД2023] §6.5.2.9."@ru .
+
+# --- три типа, отсутствующие в прозе РД (полный набор [UAG23A] §4.83) ---
+iono:EsT_d a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "d" ;
+    rdfs:label "d (D region) — частичное отражение от поглощающего слоя"@ru, "Es type d (D-region)"@en ;
+    rdfs:comment "Слабый диффузный след ниже ~95 км (чаще у 80 км, 1–3 МГц; слой Layer_D ядра) при сильном поглощении и большом fmin; строго говоря не Es; никогда не экранирует и никогда не даёт кратников; НЕ использовать для fmin/foEs/h′Es. [UAG23A] §4.83, рис. 4.31. В коде ИОНКА не представлен."@ru .
+iono:EsT_k a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "k" ;
+    rdfs:label "k — присутствие корпускулярной (particle) области E"@ru, "Es type k (particle-E)"@en ;
+    rdfs:comment "Обозначает наличие particle E (слой Layer_Ek ядра; описательная буква K). ПРИ foEs > foE(частиц) тип следа предшествует k: «r1, k2» (условие — С-20). В табуляции k имеет приоритет над всеми типами, кроме дающего foEs ([UAG23A] §4.82–4.83). В коде ИОНКА не представлен."@ru .
+iono:EsT_n a owl:NamedIndividual , iono:EsType ; iono:esTypeSymbol "n" ; iono:esTypeIonkaDigit 9 ;
+    rdfs:label "n — не классифицируется стандартными типами"@ru, "Es type n (not classifiable)"@en ;
+    rdfs:comment "След Es, не подходящий ни под один стандартный тип; применять редко (при промежуточной форме предпочесть выбор, даже неуверенный). [UAG23A] §4.83. В ML-словаре — аналог обязательного класса «неизвестно/аномалия» (необнаружимость неполноты словаря, 02-facts.md §8.4)."@ru .
+
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:EsT_a iono:EsT_c iono:EsT_d iono:EsT_f iono:EsT_h
+   iono:EsT_k iono:EsT_l iono:EsT_n iono:EsT_q iono:EsT_r iono:EsT_s ) .
+
+# --- канонические определения (IAO definition; род + видовое отличие) — 2026-09-05 ---
+iono:EsType obo:IAO_0000115 """Тип спорадического слоя Es — информационный объект, который является классификационной категорией формы следа Es по [UAG23A] §4.83 (11 типов: f, l, c, h, q, r, a, s, d, k, n)."""@ru , """An Es type is an information content entity that is a classification category of the Es trace shape per [UAG23A] §4.83 (11 types)."""@en .

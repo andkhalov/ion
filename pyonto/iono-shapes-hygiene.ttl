@@ -1,0 +1,117 @@
+@prefix iono: <http://scilibai.ru/onto/iono#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# =====================================================================
+#  iono-shapes-hygiene.ttl — ГИГИЕНА СЦЕНЫ (H0–H5), запускать ПЕРВОЙ
+#
+#  Отдельный обязательный прогон ДО содержательных форм:
+#    conforms(H) == False  ⇒  содержательные формы не запускать
+#  (T-02: один ill-typed xsd:decimal роняет pyshacl с RecursionError;
+#   T-01: numpy.float64 в xsd:decimal молча отравляет операторы > и <=).
+#
+#  H0 — корректность числовых литералов (ядерный sh:datatype ловит
+#       numpy/float/plain/ill-typed без ложных срабатываний — T-05);
+#  H1–H3 — привязка объектов к сцене (T-04/Ч-03: «сироты» без
+#       isTraceIn / denotes / isCharacteristicOf невидимы для форм
+#       и получали conforms=True);
+#  H4 — закрытость словарей значений (перенесена из oneOf ядра, М-08);
+#  H5 — мода без reflectsFromLayer не участвует в проверках (Ч-06:
+#       запись `x a Mode_1F2` без признаков выключает объект).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/shapes-hygiene> a owl:Ontology ;
+    rdfs:label "SHACL-формы гигиены сцены (H0–H5)"@ru ;
+    owl:versionInfo "0.1.0-prototype" .
+
+# --- H0: числовые литералы ---
+iono:NumericWellFormedShape a sh:NodeShape ;
+    rdfs:label "H0. Корректность числовых литералов"@ru ;
+    sh:severity sh:Violation ;
+    sh:targetSubjectsOf iono:hasNumericValue , iono:hasErrorEstimate , iono:hasMOFValue ,
+        iono:hasLOFValue , iono:hasMinDelayValue , iono:hasGyroFrequency ,
+        iono:hasStationGyroFrequency , iono:hasHopCount , iono:shortLowerRayAssumption ;
+    sh:property [ sh:path iono:hasNumericValue ; sh:datatype xsd:decimal ; sh:maxCount 1 ;
+        sh:message "H0: hasNumericValue не канонический xsd:decimal (numpy.float64/float/plain/ill-typed) — арифметика форм недостоверна; литерал строить из строки/Decimal"@ru ] ;
+    sh:property [ sh:path iono:hasErrorEstimate ; sh:datatype xsd:decimal ; sh:maxCount 1 ] ;
+    sh:property [ sh:path iono:hasMOFValue ; sh:datatype xsd:decimal ; sh:maxCount 1 ] ;
+    sh:property [ sh:path iono:hasLOFValue ; sh:datatype xsd:decimal ; sh:maxCount 1 ] ;
+    sh:property [ sh:path iono:hasMinDelayValue ; sh:datatype xsd:decimal ; sh:maxCount 1 ] ;
+    sh:property [ sh:path iono:hasGyroFrequency ; sh:datatype xsd:decimal ; sh:maxCount 1 ] ;
+    sh:property [ sh:path iono:hasStationGyroFrequency ; sh:datatype xsd:decimal ; sh:maxCount 1 ] ;
+    sh:property [ sh:path iono:hasHopCount ; sh:datatype xsd:integer ; sh:maxCount 1 ;
+        sh:message "H0: hasHopCount не xsd:integer — owl:hasValue 1 не сработает и мода не классифицируется (М-11)"@ru ] ;
+    sh:property [ sh:path iono:shortLowerRayAssumption ; sh:datatype xsd:boolean ; sh:maxCount 1 ;
+        sh:message "H0: shortLowerRayAssumption не xsd:boolean — исключение S3 не сработает (T-10)"@ru ] .
+
+# --- H1–H3: привязка к сцене ---
+iono:TraceAttachmentShape a sh:NodeShape ;
+    rdfs:label "H1. След принадлежит ионограмме"@ru ;
+    sh:severity sh:Violation ;
+    sh:targetClass iono:IonogramTrace ;
+    sh:property [ sh:path iono:isTraceIn ; sh:minCount 1 ; sh:class iono:Ionogram ;
+        sh:message "H1: след не привязан к ионограмме — формы S/V его не увидят"@ru ] ;
+    sh:property [ sh:path iono:denotes ; sh:maxCount 1 ] .
+
+iono:ModeAttachmentShape a sh:NodeShape ;
+    rdfs:label "H2. Мода обозначена каким-либо следом"@ru ;
+    sh:severity sh:Violation ;
+    sh:targetClass iono:PropagationMode ;
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "H2: мода {$this} не обозначена ни одним следом (и не является кандидатной гипотезой)"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this WHERE {
+              FILTER NOT EXISTS { ?t iono:denotes $this ; iono:isTraceIn ?i }
+              FILTER NOT EXISTS { ?t2 iono:hasCandidateMode $this }
+            }
+        """ ] .
+
+iono:CharAttachmentShape a sh:NodeShape ;
+    rdfs:label "H3. Характеристика снята с ионограммы"@ru ;
+    sh:severity sh:Violation ;
+    sh:targetClass iono:CharacteristicDatum ;
+    sh:property [ sh:path iono:isCharacteristicOf ; sh:minCount 1 ; sh:class iono:Ionogram ;
+        sh:message "H3: характеристика не привязана к ионограмме — формы Q её не увидят"@ru ] .
+
+# --- H4: закрытость словарей (вместо oneOf в ядре, М-08) ---
+iono:EnumClosureShape a sh:NodeShape ;
+    rdfs:label "H4. Значения из закрытых словарей"@ru ;
+    sh:severity sh:Violation ;
+    sh:targetClass iono:PropagationMode ;
+    sh:property [ sh:path iono:hasRayType ;
+        sh:in ( iono:lowerRay iono:upperRay iono:mixedRay ) ; sh:maxCount 1 ;
+        sh:message "H4: недопустимое значение hasRayType"@ru ] ;
+    sh:property [ sh:path iono:hasMagnetoionicComponent ;
+        sh:in ( iono:ordinary iono:extraordinary iono:zComponent iono:unresolved ) ; sh:maxCount 1 ;
+        sh:message "H4: недопустимое значение hasMagnetoionicComponent"@ru ] ;
+    sh:property [ sh:path iono:hasPathClass ;
+        sh:in ( iono:greatCircle iono:offGreatCircle ) ; sh:maxCount 1 ;
+        sh:message "H4: недопустимое значение hasPathClass"@ru ] .
+
+iono:AccuracyClosureShape a sh:NodeShape ;
+    rdfs:label "H4a. Класс точности из словаря"@ru ;
+    sh:severity sh:Violation ;
+    sh:targetSubjectsOf iono:hasAccuracyClass ;
+    sh:property [ sh:path iono:hasAccuracyClass ;
+        sh:in ( iono:accurate iono:estimated iono:limitValue iono:replacedByLetter iono:doubtful ) ;
+        sh:maxCount 1 ;
+        sh:message "H4a: недопустимое значение hasAccuracyClass"@ru ] .
+
+# --- H5: мода без выводимого слоя выпадает из всех проверок (Ч-06) ---
+iono:ModeCheckableShape a sh:NodeShape ;
+    rdfs:label "H5. Мода участвует в проверках"@ru ;
+    sh:severity sh:Warning ;
+    sh:targetClass iono:PropagationMode ;
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "H5: у моды {$this} нет reflectsFromLayer (ни прямо, ни через сегмент после замыкания) — она не участвует ни в одной S/V-форме; пишите признаки, а не имя класса Mode_*"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this WHERE {
+              FILTER NOT EXISTS { $this iono:reflectsFromLayer ?L }
+            }
+        """ ] .
+
+iono: sh:declare [ sh:prefix "iono" ; sh:namespace "http://scilibai.ru/onto/iono#"^^xsd:anyURI ] .

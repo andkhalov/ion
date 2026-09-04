@@ -1,0 +1,469 @@
+@prefix iono: <http://scilibai.ru/onto/iono#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix obo:  <http://purl.obolibrary.org/obo/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# =====================================================================
+#  iono-core.ttl — ядро онтологии семантической интерпретации ионограмм
+#  наклонного зондирования. ПРОТОТИП (этап 1 по Grüninger & Fox).
+#
+#  Источник словаря: mine/inonograms/report/ontology_CQ_et0.md, §3–4.
+#  Выравнивание на BFO 2020 + IAO задано ссылками на IRI obo:BFO_*/IAO_*
+#  (без owl:imports: полный импорт BFO не нужен для проверок этапа 1
+#   и утяжеляет замыкание; согласование выполнено вручную по §3.1).
+#
+#  Профиль: OWL 2 RL (проверяется owlrl). Числовые ограничения,
+#  невыразимые в DL, вынесены в iono-shapes.ttl (SHACL).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono> a owl:Ontology ;
+    rdfs:label "Онтология интерпретации ионограмм наклонного зондирования (ядро, прототип)"@ru ;
+    rdfs:comment "Прототип этапа 1. Покрывает CQ уровней 0–3 из ontology_CQ_et0.md."@ru ;
+        rdfs:comment """Ключи источников в аннотациях: [РД2023] = РД 52.26.817–2023 «Проведение наблюдений за ионосферой...» (Росгидромет; печатная страница = страница PDF − 10); [UAG23A] = Piggott W.R., Rawer K. URSI Handbook of Ionogram Interpretation and Reduction, Rep. UAG-23A, NOAA, 1978; [Щирый2007] = Щирый А.О., дисс. канд. техн. наук, СПб., 2007; [ЛС2026] = Литвинов В.Л., Скрипачев В.О., монография по ионосферному зондированию, 2026; [Davies1990] = Davies K. Ionospheric Radio. IET, 1990; [SAO43] = SAO 4.3 (ulcar.uml.edu/~iag/SAO-4.3.htm); [ArpSmithSpear2015] = Arp R., Smith B., Spear A.D. Building Ontologies with BFO. MIT Press, 2015. Идентификаторы вида М-xx/Ф-xx/Ч-xx/T-xx/С-xx — находки пяти независимых ревью онтологии (методология/физика/читатель/техника/сверка источников, 2026-09-03; протокол решений — research/05-shiryi-merge.md)."""@ru ;
+    owl:versionInfo "0.3.0-prototype" .
+
+# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
+#  0. Переиспользуемые внешние классы: BFO 2020 и IAO (OBO Foundry).
+#     Полный owl:imports BFO сознательно НЕ выполняется (RL-профиль,
+#     производительность pyshacl); классы декларируются по IRI с
+#     аннотациями, чтобы переиспользование было явным и проверяемым.
+# ---------------------------------------------------------------------
+obo:BFO_0000015 a owl:Class ;
+    rdfs:label "process (BFO 2020)"@en ;
+    rdfs:comment "Оккурент: наши процессы распространения (PropagationMode, TrajectorySegment, SoundingSession)."@ru .
+obo:BFO_0000040 a owl:Class ;
+    rdfs:label "material entity (BFO 2020)"@en ;
+    rdfs:comment "Материальная сущность: ионозонд, пункт наблюдений, трасса как объект."@ru .
+obo:BFO_0000029 a owl:Class ;
+    rdfs:label "site (BFO 2020)"@en ;
+    rdfs:comment "Место: ионосферные слои как области отражения."@ru .
+obo:IAO_0000115 a owl:AnnotationProperty ;
+    rdfs:label "definition (IAO)"@en ;
+    rdfs:comment "Каноническое определение термина (род + видовое отличие, [ArpSmithSpear2015] гл. 3); операционные детали остаются в rdfs:comment."@ru .
+obo:IAO_0000109 a owl:Class ;
+    rdfs:label "measurement datum (IAO)"@en ;
+    rdfs:comment "Данное измерения: суперкласс MeasurementDatum (значения характеристик, снятые с ионограммы)."@ru .
+obo:IAO_0000030 a owl:Class ;
+    rdfs:label "information content entity (IAO)"@en ;
+    rdfs:comment "Информационный объект: ионограмма, след, данные измерений, модель прибора, урсиграммы."@ru .
+
+#  1. Оккуренты: процессы распространения      (BFO_0000015 = process)
+# ---------------------------------------------------------------------
+
+iono:RadioWavePropagation a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000015 ;
+    rdfs:label "Распространение радиоволны"@ru, "radio wave propagation"@en .
+
+iono:PropagationMode a owl:Class ;
+    rdfs:subClassOf iono:RadioWavePropagation ;
+    rdfs:label "Способ (мода) распространения"@ru, "propagation mode"@en ;
+    rdfs:comment "Реальный процесс распространения сигнала от передатчика к приёмнику по определённой траектории. CQ-2.1."@ru .
+
+iono:TrajectorySegment a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000015 ;
+    rdfs:label "Сегмент траектории (скачок)"@ru, "trajectory segment"@en ;
+    rdfs:comment "Собственная часть процесса-моды: один скачок с одним отражением. CQ-2.5."@ru .
+
+iono:SoundingSession a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000015 ;
+    rdfs:label "Сеанс зондирования"@ru, "sounding session"@en .
+
+# ---------------------------------------------------------------------
+#  2. Независимые континуанты                  (BFO_0000040 = material entity,
+#                                               BFO_0000029 = site)
+# ---------------------------------------------------------------------
+
+iono:IonosphericLayer a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000040 ;
+    rdfs:label "Ионосферный слой"@ru, "ionospheric layer"@en .
+
+iono:LayerE  a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ; rdfs:label "Слой E"@ru, "layer E"@en .
+iono:LayerF1 a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ; rdfs:label "Слой F1"@ru, "layer F1"@en .
+iono:LayerF2 a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ; rdfs:label "Слой F2"@ru, "layer F2"@en .
+iono:SporadicELayer a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ; rdfs:label "Спорадический слой Es"@ru, "sporadic E layer"@en .
+
+[] a owl:AllDisjointClasses ;
+   owl:members ( iono:LayerE iono:LayerF1 iono:LayerF2 iono:SporadicELayer ) .
+
+iono:RadioPath a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;
+    rdfs:label "Радиотрасса"@ru, "radio path"@en ;
+    rdfs:comment "Участок между пунктами передачи и приёма. Паспорт трассы — CQ-0.5."@ru .
+
+iono:ReflectionPoint a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000029 ;
+    rdfs:label "Точка отражения"@ru, "reflection point"@en .
+
+# --- индивиды-слои (порядок по высоте задан явно) ---
+iono:Layer_E  a owl:NamedIndividual , iono:LayerE  ; iono:layerHeightOrder 1 .
+iono:Layer_Es a owl:NamedIndividual , iono:SporadicELayer ; iono:layerHeightOrder 1 .
+iono:Layer_F1 a owl:NamedIndividual , iono:LayerF1 ; iono:layerHeightOrder 2 .
+iono:Layer_F2 a owl:NamedIndividual , iono:LayerF2 ; iono:layerHeightOrder 3 .
+
+iono:layerHeightOrder a owl:DatatypeProperty ;
+    rdfs:domain iono:IonosphericLayer ; rdfs:range xsd:integer ;
+    rdfs:label "Порядок слоя по высоте отражения"@ru, "layer height order"@en ;
+    rdfs:comment """Служебное свойство для формы S4 (CQ-3.2, CQ-3.3): при одной кратности
+групповая задержка растёт с высотой отражения, поскольку P = sqrt(D^2 + (2 n h)^2).
+Слои E и Es получают один и тот же уровень: их высоты отражения близки (около 100-120 км).
+ВАЖНО: упорядоченность НАБЛЮДАЕМЫХ ЧАСТОТ по слоям при наклонном падении НЕ выполняется,
+поскольку множитель секанса тем больше, чем ниже слой; такой формы в наборе намеренно нет."""@ru .
+
+# ---------------------------------------------------------------------
+#  3. Информационные объекты                   (IAO_0000030 = ICE)
+# ---------------------------------------------------------------------
+
+iono:Ionogram a owl:Class ;
+    rdfs:subClassOf obo:IAO_0000030 ;
+    rdfs:label "Ионограмма"@ru, "ionogram"@en .
+
+iono:IonogramTrace a owl:Class ;
+    rdfs:subClassOf obo:IAO_0000030 ;
+    rdfs:label "Трек (след) на ионограмме"@ru, "ionogram trace"@en ;
+    rdfs:comment "Информационный объект, обозначающий процесс-моду. CQ-1.1, CQ-2.1."@ru .
+
+iono:MeasurementDatum a owl:Class ;
+    rdfs:subClassOf obo:IAO_0000109 ;
+    rdfs:label "Данное измерения"@ru, "measurement datum"@en .
+
+iono:MOFDatum   a owl:Class ; rdfs:subClassOf iono:MeasurementDatum ; rdfs:label "МНЧ моды"@ru, "MOF datum"@en .
+iono:LOFDatum   a owl:Class ; rdfs:subClassOf iono:MeasurementDatum ; rdfs:label "ННЧ моды"@ru, "LOF datum"@en .
+iono:DelayDatum a owl:Class ; rdfs:subClassOf iono:MeasurementDatum ; rdfs:label "Групповая задержка моды"@ru, "delay datum"@en .
+
+iono:FrequencyInterval a owl:Class ;
+    rdfs:subClassOf obo:IAO_0000030 ;
+    rdfs:label "Интервал постоянной многолучёвости"@ru, "frequency interval"@en .
+
+iono:MultipathModel a owl:Class ;
+    rdfs:subClassOf obo:IAO_0000030 ;
+    rdfs:label "Модель многолучёвости"@ru, "multipath model"@en ;
+    rdfs:comment "Именованный паттерн состава мод на частотном интервале; ММЛ I–XV по Щирый, 2007, табл. 3.9."@ru .
+
+iono:InterpretationHypothesis a owl:Class ;
+    rdfs:subClassOf obo:IAO_0000030 ;
+    rdfs:label "Гипотеза интерпретации"@ru, "interpretation hypothesis"@en .
+
+# ---------------------------------------------------------------------
+#  4. Классификаторы-значения (перечислимые)
+# ---------------------------------------------------------------------
+
+iono:RayType a owl:Class ; rdfs:label "Тип луча"@ru, "ray type"@en ;
+    rdfs:comment "0.3.0: перечисление открыто (oneOf снят, М-08); закрытость значений проверяется SHACL-формой H4 (iono-shapes-hygiene.ttl), расширение словаря не требует правки ядра."@ru .
+iono:lowerRay a owl:NamedIndividual , iono:RayType ; rdfs:label "нижний луч"@ru, "lower ray"@en .
+iono:upperRay a owl:NamedIndividual , iono:RayType ; rdfs:label "верхний (педерсеновский) луч"@ru, "upper ray"@en .
+iono:mixedRay a owl:NamedIndividual , iono:RayType ; rdfs:label "смешанный"@ru, "mixed ray"@en .
+
+iono:MagnetoionicComponent a owl:Class ; rdfs:label "Магнитоионная компонента"@ru, "magnetoionic component"@en ;
+    rdfs:comment "0.3.0: перечисление открыто (М-08); закрытость — SHACL H4."@ru .
+iono:ordinary       a owl:NamedIndividual , iono:MagnetoionicComponent ; rdfs:label "обыкновенная"@ru, "ordinary"@en .
+iono:extraordinary  a owl:NamedIndividual , iono:MagnetoionicComponent ; rdfs:label "необыкновенная"@ru, "extraordinary"@en .
+iono:zComponent     a owl:NamedIndividual , iono:MagnetoionicComponent ; rdfs:label "третья (Z) компонента"@ru, "z component"@en ;
+    rdfs:comment "Добавлена при модульном расширении (0.2.0): Z-след характерен для высокоширотных пунктов; описательная буква Z и оценочная Z (характеристика O, вычисленная по Z-компоненте) — [РД2023], §6.5.4. Решение по вопросу 3 сверки 05-shiryi-merge.md."@ru .
+iono:unresolved     a owl:NamedIndividual , iono:MagnetoionicComponent ; rdfs:label "не разрешена"@ru, "unresolved"@en .
+
+iono:PathClass a owl:Class ; rdfs:label "Класс траектории"@ru, "path class"@en ;
+    rdfs:comment "0.3.0: перечисление открыто (М-08); закрытость — SHACL H4."@ru .
+iono:greatCircle    a owl:NamedIndividual , iono:PathClass ; rdfs:label "по дуге большого круга"@ru, "great circle"@en .
+iono:offGreatCircle a owl:NamedIndividual , iono:PathClass ; rdfs:label "вне дуги большого круга"@ru, "off great circle"@en .
+
+# ---------------------------------------------------------------------
+#  5. Отношения
+# ---------------------------------------------------------------------
+
+iono:denotes a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:IonogramTrace ; rdfs:range iono:PropagationMode ;
+    rdfs:label "обозначает"@ru, "denotes"@en ;
+    rdfs:comment "Центральное отношение семантической интерпретации: трек (ICE) обозначает моду (процесс). CQ-2.1."@ru .
+
+iono:hasCandidateMode a owl:ObjectProperty ;
+    rdfs:domain iono:IonogramTrace ; rdfs:range iono:PropagationMode ;
+    rdfs:label "имеет кандидатную моду"@ru, "has candidate mode"@en .
+iono:denotes rdfs:subPropertyOf iono:hasCandidateMode .
+
+iono:isTraceIn a owl:ObjectProperty ;
+    rdfs:domain iono:IonogramTrace ; rdfs:range iono:Ionogram ; rdfs:label "принадлежит ионограмме"@ru, "is trace in"@en .
+
+iono:hasTrajectorySegment a owl:ObjectProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range iono:TrajectorySegment ;
+    rdfs:label "имеет сегмент траектории"@ru, "has trajectory segment"@en .
+
+iono:reflectsFrom a owl:ObjectProperty ;
+    rdfs:domain iono:TrajectorySegment ; rdfs:range iono:IonosphericLayer ;
+    rdfs:label "отражается от"@ru, "reflects from"@en .
+
+iono:reflectsFromLayer a owl:ObjectProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range iono:IonosphericLayer ;
+    rdfs:label "отражается от слоя"@ru, "reflects from layer"@en ;
+    owl:propertyChainAxiom ( iono:hasTrajectorySegment iono:reflectsFrom ) .
+
+iono:occursOn a owl:ObjectProperty ;
+    rdfs:domain iono:RadioWavePropagation ; rdfs:range iono:RadioPath ; rdfs:label "происходит на трассе"@ru, "occurs on"@en .
+
+iono:hasRayType a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range iono:RayType ; rdfs:label "тип луча"@ru, "has ray type"@en .
+
+iono:hasMagnetoionicComponent a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range iono:MagnetoionicComponent ;
+    rdfs:label "магнитоионная компонента"@ru, "has magnetoionic component"@en .
+
+iono:hasPathClass a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range iono:PathClass ; rdfs:label "класс траектории"@ru, "has path class"@en .
+
+iono:coOccursWith a owl:ObjectProperty , owl:SymmetricProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range iono:PropagationMode ;
+    rdfs:label "наблюдается совместно с"@ru, "co occurs with"@en .
+
+iono:hasModeOnInterval a owl:ObjectProperty ;
+    rdfs:domain iono:FrequencyInterval ; rdfs:range iono:PropagationMode ;
+    rdfs:label "содержит моду на интервале"@ru, "has mode on interval"@en .
+
+iono:isAbout a owl:ObjectProperty ;
+    rdfs:domain iono:MeasurementDatum ;
+    rdfs:label "относится к (общее)"@ru, "is about"@en ;
+    rdfs:comment "0.3.0: range снят (М-01 — прежний range PropagationMode материализовал слой как процесс). Используйте подсвойства isAboutMode / isAboutLayer."@ru .
+iono:isAboutMode a owl:ObjectProperty ; rdfs:subPropertyOf iono:isAbout ;
+    rdfs:domain iono:MeasurementDatum ; rdfs:range iono:PropagationMode ;
+    rdfs:label "относится к моде"@ru, "is about mode"@en .
+iono:isAboutLayer a owl:ObjectProperty ; rdfs:subPropertyOf iono:isAbout ;
+    rdfs:domain iono:MeasurementDatum ; rdfs:range iono:IonosphericLayer ;
+    rdfs:label "относится к слою"@ru, "is about layer"@en .
+
+iono:derivedFrom a owl:ObjectProperty ;
+    rdfs:domain iono:MeasurementDatum ; rdfs:range iono:MeasurementDatum ;
+    rdfs:label "выведено из"@ru, "derived from"@en ;
+    rdfs:comment "Разделяет наблюдаемое и выводимое: МНЧ моды первого порядка часто восстанавливается регрессией по моде высшего порядка. CQ-4.2."@ru .
+
+# --- свойства-значения ---
+iono:hasHopCount a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range xsd:integer ; rdfs:label "кратность (число скачков)"@ru, "has hop count"@en .
+iono:hasMOFValue a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range xsd:decimal ; rdfs:label "МНЧ моды, МГц"@ru, "has MOF value"@en .
+iono:hasLOFValue a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range xsd:decimal ; rdfs:label "ННЧ моды, МГц"@ru, "has LOF value"@en .
+iono:hasMinDelayValue a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range xsd:decimal ; rdfs:label "минимальная групповая задержка моды, мс"@ru, "has min delay value"@en .
+iono:hasPathLength a owl:DatatypeProperty ;
+    rdfs:domain iono:RadioPath ; rdfs:range xsd:decimal ; rdfs:label "длина трассы, км"@ru, "has path length"@en .
+iono:hasModeLabel a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range xsd:string ;
+    rdfs:label "обозначение моды в нотации регламента"@ru, "has mode label"@en ;
+    rdfs:comment "Строковая метка вида 1F2, 2F2, 1EEs по [РД2023], §7.3.2 (с. 101 печ.). Суффикс «п» для верхнего (педерсеновского) луча — расширение проекта по нотации диссертации Щирого (2007, с. 26), в РД отсутствует (С-05). Служит для сопоставления с телеграммой УСФРЕ и для формы S5."@ru .
+
+# --- допущения в смысле Grüninger & Fox, §6 (частные случаи, снимающие аксиому) ---
+iono:shortLowerRayAssumption a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:PropagationMode ; rdfs:range xsd:boolean ;
+    rdfs:label "допущение о коротком нижнем луче"@ru, "short lower ray assumption"@en ;
+    rdfs:comment "Модели ММЛ XI–XIV: нижний луч отсутствует или очень короток при наблюдаемом верхнем. Щирый, 2007, §3.3.3."@ru .
+
+# ---------------------------------------------------------------------
+#  6. Определяемые классы (equivalentClass; классифицируются ризонером)
+#     Моды порождаются комбинацией ортогональных признаков — §4.1 CQ-документа.
+# ---------------------------------------------------------------------
+
+iono:Mode_1F2 a owl:Class ; rdfs:label "Мода 1F2"@ru, "propagation mode 1F2"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasHopCount        ; owl:hasValue 1 ]
+        [ a owl:Restriction ; owl:onProperty iono:reflectsFromLayer  ; owl:someValuesFrom iono:LayerF2 ]
+        [ a owl:Restriction ; owl:onProperty iono:hasRayType         ; owl:hasValue iono:lowerRay ]
+    ) ] .
+
+iono:Mode_1F2p a owl:Class ; rdfs:label "Мода 1F2п (верхний луч)"@ru, "propagation mode 1F2p"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasHopCount        ; owl:hasValue 1 ]
+        [ a owl:Restriction ; owl:onProperty iono:reflectsFromLayer  ; owl:someValuesFrom iono:LayerF2 ]
+        [ a owl:Restriction ; owl:onProperty iono:hasRayType         ; owl:hasValue iono:upperRay ]
+    ) ] .
+
+iono:Mode_2F2 a owl:Class ; rdfs:label "Мода 2F2"@ru, "propagation mode 2F2"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasHopCount        ; owl:hasValue 2 ]
+        [ a owl:Restriction ; owl:onProperty iono:reflectsFromLayer  ; owl:someValuesFrom iono:LayerF2 ]
+        [ a owl:Restriction ; owl:onProperty iono:hasRayType         ; owl:hasValue iono:lowerRay ]
+    ) ] .
+
+iono:Mode_2F2p a owl:Class ; rdfs:label "Мода 2F2п"@ru, "propagation mode 2F2p"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasHopCount        ; owl:hasValue 2 ]
+        [ a owl:Restriction ; owl:onProperty iono:reflectsFromLayer  ; owl:someValuesFrom iono:LayerF2 ]
+        [ a owl:Restriction ; owl:onProperty iono:hasRayType         ; owl:hasValue iono:upperRay ]
+    ) ] .
+
+iono:Mode_3F2 a owl:Class ; rdfs:label "Мода 3F2"@ru, "propagation mode 3F2"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasHopCount        ; owl:hasValue 3 ]
+        [ a owl:Restriction ; owl:onProperty iono:reflectsFromLayer  ; owl:someValuesFrom iono:LayerF2 ]
+        [ a owl:Restriction ; owl:onProperty iono:hasRayType         ; owl:hasValue iono:lowerRay ]
+    ) ] .
+
+iono:Mode_1E a owl:Class ; rdfs:label "Мода 1E"@ru, "propagation mode 1E"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasHopCount        ; owl:hasValue 1 ]
+        [ a owl:Restriction ; owl:onProperty iono:reflectsFromLayer  ; owl:someValuesFrom iono:LayerE ]
+    ) ] .
+
+iono:Mode_1Es a owl:Class ; rdfs:label "Мода 1Es"@ru, "propagation mode 1Es"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasHopCount        ; owl:hasValue 1 ]
+        [ a owl:Restriction ; owl:onProperty iono:reflectsFromLayer  ; owl:someValuesFrom iono:SporadicELayer ]
+    ) ] .
+
+# --- структурные классы мод ---
+iono:PedersenMode a owl:Class ; rdfs:label "Педерсеновская (верхнелучевая) мода"@ru, "pedersen mode"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasRayType ; owl:hasValue iono:upperRay ]
+    ) ] .
+
+iono:LowerRayMode a owl:Class ; rdfs:label "Нижнелучевая мода"@ru, "lower ray mode"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasRayType ; owl:hasValue iono:lowerRay ]
+    ) ] .
+
+iono:OffGreatCircleMode a owl:Class ; rdfs:label "Боковая мода"@ru, "off great circle mode"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PropagationMode
+        [ a owl:Restriction ; owl:onProperty iono:hasPathClass ; owl:hasValue iono:offGreatCircle ]
+    ) ] .
+
+# Простая и комбинированная моды различаются числом сегментов траектории и
+# различием отражающих слоёв. Условия такого вида (счётные и сравнивающие
+# значения разных индивидов) выходят за профиль OWL 2 RL, поэтому классы
+# оставлены примитивными, а различение вынесено в SHACL. CQ-2.5.
+iono:SimpleMode   a owl:Class ; rdfs:subClassOf iono:PropagationMode ; rdfs:label "Простая мода"@ru, "simple mode"@en .
+iono:CombinedMode a owl:Class ; rdfs:subClassOf iono:PropagationMode ; rdfs:label "Комбинированная мода"@ru, "combined mode"@en .
+
+# --- классы треков ---
+iono:InterpretedTrace a owl:Class ; rdfs:label "Интерпретированный трек"@ru, "interpreted trace"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:IonogramTrace
+        [ a owl:Restriction ; owl:onProperty iono:denotes ; owl:someValuesFrom iono:PropagationMode ]
+    ) ] .
+
+iono:UnresolvedMagnetoionicTrace a owl:Class ; rdfs:label "Трек с неразрешённым магнитоионным расщеплением"@ru, "unresolved magnetoionic trace"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:IonogramTrace
+        [ a owl:Restriction ; owl:onProperty iono:denotes ; owl:someValuesFrom
+            [ a owl:Class ; owl:intersectionOf (
+                iono:PropagationMode
+                [ a owl:Restriction ; owl:onProperty iono:hasMagnetoionicComponent ; owl:hasValue iono:unresolved ] ) ] ]
+    ) ] .
+
+
+# =====================================================================
+#  РАСШИРЕНИЕ 0.3.0 (2026-09-03) — по итогам пяти независимых ревью
+#  (research/reviews-onto/). Только добавления; существующие аксиомы
+#  не менялись, кроме снятия oneOf, range isAbout и комментария
+#  hasModeLabel (см. журнал 06-fixes.md).
+# =====================================================================
+
+# --- М-02: категориальные границы, на которых держится проверяемость ---
+[] a owl:AllDisjointClasses ; owl:members (
+   iono:RadioWavePropagation iono:IonosphericLayer iono:RadioPath
+   iono:Ionogram iono:IonogramTrace iono:MeasurementDatum ) .
+
+# --- М-07: различность значений словарей (без неё functional-свойства
+#     молча склеивают индивиды через sameAs вместо противоречия) ---
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:lowerRay iono:upperRay iono:mixedRay ) .
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:ordinary iono:extraordinary iono:zComponent iono:unresolved ) .
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:greatCircle iono:offGreatCircle ) .
+[] a owl:AllDifferent ; owl:distinctMembers (
+   iono:Layer_D iono:Layer_E iono:Layer_Ek iono:Layer_Es iono:Layer_F iono:Layer_F1 iono:Layer_F2 iono:Layer_F3 ) .
+
+# --- М-19: метки индивидов-слоёв ---
+iono:Layer_E  rdfs:label "слой E (обозначение)"@ru, "ionospheric layer E"@en .
+iono:Layer_Es rdfs:label "слой Es (обозначение)"@ru, "ionospheric layer Es"@en .
+iono:Layer_F1 rdfs:label "слой F1 (обозначение)"@ru, "ionospheric layer F1"@en .
+iono:Layer_F2 rdfs:label "слой F2 (обозначение)"@ru, "ionospheric layer F2"@en .
+
+# --- М-03 (решение): индивиды Layer_* сознательно используются как
+#     ОБОЗНАЧЕНИЯ слоёв (ряд lowerRay/ordinary), а не как партикулярные
+#     материальные сущности конкретного сеанса; полная реификация
+#     LayerDesignation отложена до 0.4 (см. README, «Отложенное»).
+
+# --- Ф-36, Ф-37: недостающие слои/области ---
+iono:FRegion a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ;
+    rdfs:label "Область F в целом"@ru, "f region"@en ;
+    rdfs:comment "Референт h'F («минимальная действующая высота следа области F, взятой в целом») и fxI («наибольшая частота отражений от области F»). [РД2023] §4.1, с. 13–14 печ. Штатный ночной случай «F без F1»."@ru .
+iono:LayerF3 a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ;
+    rdfs:label "Слой F3 (экваториальный, G-слой)"@ru, "layer F3"@en ;
+    rdfs:comment "Дневной дополнительный слой над F2 у магнитного экватора (штатен для Jicamarca). Без него след F3 ошибочно относится к F2 и портит foF2. Ревью 02, Ф-37."@ru .
+iono:ParticleELayer a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ;
+    rdfs:label "Корпускулярная (particle) область E"@ru, "particle E layer"@en ;
+    rdfs:comment "Ночная E при высыпаниях (буква K, тип Es-k); foE(частиц) может превышать ночную foF2 — исключение из порядка Q1. [UAG23A] §4.83, рис. 4.33; [РД2023] §6.5.4.3 (буква K)."@ru .
+iono:DRegionLayer a owl:Class ; rdfs:subClassOf iono:IonosphericLayer ;
+    rdfs:label "Область D"@ru, "D region layer"@en ;
+    rdfs:comment "60–90 км; неотклоняющее поглощение, тип Es-d (~80 км). Ревью 02, Ф-37г."@ru .
+
+iono:Layer_F  a owl:NamedIndividual , iono:FRegion  ; rdfs:label "область F в целом (обозначение)"@ru, "ionospheric layer F"@en ; iono:layerHeightOrder 2 .
+iono:Layer_F3 a owl:NamedIndividual , iono:LayerF3 ; rdfs:label "слой F3 (обозначение)"@ru, "ionospheric layer F3"@en ; iono:layerHeightOrder 4 .
+iono:Layer_Ek a owl:NamedIndividual , iono:ParticleELayer ; rdfs:label "корпускулярная E (обозначение)"@ru, "ionospheric layer Ek"@en ; iono:layerHeightOrder 1 .
+iono:Layer_D  a owl:NamedIndividual , iono:DRegionLayer ; rdfs:label "область D (обозначение)"@ru, "ionospheric layer D"@en ; iono:layerHeightOrder 0 .
+
+# --- Ф-35: отдельный порядок КРИТИЧЕСКИХ ЧАСТОТ при ВЗ (не путать с
+#     layerHeightOrder — порядком задержек). Es, particle-E, D, F —
+#     намеренно без значения: они порядку не подчиняются ---
+iono:verticalPeakOrder a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:IonosphericLayer ; rdfs:range xsd:integer ;
+    rdfs:label "порядок критических частот при вертикальном зондировании"@ru, "vertical peak order"@en ;
+    rdfs:comment "foE ≤ foF1 ≤ foF2 (≤ foF3) при ВЗ. Для наклонного падения порядок наблюдаемых частот НЕ выполняется (секанс, [РД2023] §6.5.6.2: МПЧ 1E 11,5 > МПЧ 1F2 9 МГц) — формы на этом свойстве применимы только к ВЗ. Ревью 02, Ф-16/Ф-35."@ru .
+iono:Layer_E  iono:verticalPeakOrder 1 .
+iono:Layer_F1 iono:verticalPeakOrder 2 .
+iono:Layer_F2 iono:verticalPeakOrder 3 .
+iono:Layer_F3 iono:verticalPeakOrder 4 .
+
+# --- Ф-38: уточнение к layerHeightOrder ---
+iono:layerHeightOrder rdfs:comment "0.3.0: равенство порядков E и Es — сознательный отказ от их взаимного упорядочивания (Es типов l/d лежит на уровне или ниже E), а не утверждение о близости высот. Формула P = sqrt(D² + (2nh)²) — плоскоземное приближение при равных скачках. Ревью 02, Ф-38."@ru .
+
+# --- Ф-39: отражение от земли; смысл кратности при ВЗ ---
+iono:GroundReflection a owl:Class ; rdfs:subClassOf obo:BFO_0000015 ;
+    rdfs:label "Отражение от земной поверхности"@ru, "ground reflection"@en ;
+    rdfs:comment "Между скачками многоскачковой моды. При ВЗ hasHopCount = порядок кратности: n проходов «вверх-вниз» с (n−1) отражениями от земли; h'_n = n·h'_1 точно ([РД2023] §6.5.1.3, с. 52 печ.)."@ru .
+
+# --- T-13: словарь типов трасс (использовался в ground-сценах без объявления) ---
+iono:PathType a owl:Class ; rdfs:label "Тип радиотрассы"@ru, "path type"@en ;
+    rdfs:comment "Часть паспорта трассы ([РД2023] §7.3.1): широтная зона/ориентация, определяющая ожидаемый состав мод."@ru .
+iono:hasPathType a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:RadioPath ; rdfs:range iono:PathType ; rdfs:label "тип трассы"@ru, "has path type"@en .
+iono:midlatitude    a owl:NamedIndividual , iono:PathType ; rdfs:label "среднеширотная"@ru, "midlatitude"@en .
+iono:subauroral     a owl:NamedIndividual , iono:PathType ; rdfs:label "субавроральная"@ru, "subauroral"@en .
+iono:auroral        a owl:NamedIndividual , iono:PathType ; rdfs:label "авроральная"@ru, "auroral"@en .
+iono:transequatorial a owl:NamedIndividual , iono:PathType ; rdfs:label "трансэкваториальная"@ru, "transequatorial"@en .
+
+# --- М-10: функциональность связей сцены ---
+iono:isTraceIn a owl:FunctionalProperty .
+iono:occursOn  a owl:FunctionalProperty .
+
+# --- М-11: границы OWL 2 RL (предупреждение пользователю) ---
+<http://scilibai.ru/onto/iono> rdfs:comment """Границы профиля OWL 2 RL (0.3.0, М-11):
+(1) определяемые классы Mode_*/Char_* работают только в направлении «признаки → класс»;
+запись `x a Mode_1F2` БЕЗ признаков не даёт reflectsFromLayer и выключает объект из всех
+SHACL-проверок (страховка — форма H5 модуля hygiene);
+(2) owl:hasValue 1 типизирован xsd:integer: значение "1"^^xsd:decimal классификацию не
+запускает — нормализуйте hasHopCount к integer (форма H0);
+(3) словари значений открыты (М-08), их закрытость проверяет SHACL H4."""@ru .
+
+# --- М-13 (частично): статус реифицированных величин ядра ---
+iono:MOFDatum   rdfs:comment "Зарезервировано: SHACL-формы читают hasMOFValue на моде (канонический способ); реифицированная запись через MOFDatum допустима, но формами пока не проверяется (М-13, Ч-07). Связь с модой — isAboutMode."@ru .
+iono:LOFDatum   rdfs:comment "См. комментарий MOFDatum."@ru .
+iono:DelayDatum rdfs:comment "См. комментарий MOFDatum."@ru .
+
+# --- канонические определения (IAO definition; род + видовое отличие) — 2026-09-05 ---
+iono:IonogramTrace obo:IAO_0000115 """След на ионограмме — информационный объект (IAO ICE), который представляет собой связную кривую точек эха на ионограмме и который порождён отражениями одной моды распространения."""@ru , """An ionogram trace is an information content entity that is a connected curve of echo points on an ionogram and that is produced by reflections of a single propagation mode."""@en .
+iono:PropagationMode obo:IAO_0000115 """Мода распространения — процесс (BFO process), который является распространением радиоволны между передатчиком и приёмником и который характеризуется кратностью скачков, отражающим слоем, типом луча и магнитоионной компонентой."""@ru , """A propagation mode is a process that is the propagation of a radio wave between transmitter and receiver and that is characterized by hop count, reflecting layer, ray type and magnetoionic component."""@en .
+iono:Ionogram obo:IAO_0000115 """Ионограмма — информационный объект, который является двумерной записью амплитуды эха в координатах «частота × групповая задержка (действующая высота или дальность)» и который порождён сеансом зондирования."""@ru , """An ionogram is an information content entity that is a two-dimensional record of echo amplitude in frequency × group-delay coordinates and that is produced by a sounding session."""@en .
+iono:TrajectorySegment obo:IAO_0000115 """Сегмент траектории — процесс, который является частью моды распространения и который соединяет два последовательных акта отражения (от слоя или от земной поверхности)."""@ru , """A trajectory segment is a process that is part of a propagation mode and that connects two consecutive reflection events (from a layer or from the ground)."""@en .
+iono:IonosphericLayer obo:IAO_0000115 """Ионосферный слой — область (BFO site), которая является областью повышенной электронной концентрации в ионосфере и которая способна отражать радиоволны заданного частотного диапазона."""@ru , """An ionospheric layer is a site that is a region of enhanced electron density in the ionosphere and that is capable of reflecting radio waves of a given frequency range."""@en .
+iono:MeasurementDatum obo:IAO_0000115 """Данное измерения — информационный объект (IAO measurement datum), который является значением величины, снятым с ионограммы, и который может сопровождаться единицей, оценкой погрешности и квалификацией качества."""@ru , """A measurement datum is an information content entity that is a value of a quantity read off an ionogram and that may carry a unit, an error estimate and quality qualification."""@en .
+iono:InterpretationHypothesis obo:IAO_0000115 """Гипотеза интерпретации — информационный объект, который является приписыванием мод следам одной ионограммы и который подлежит проверке формами физической допустимости."""@ru , """An interpretation hypothesis is an information content entity that is an assignment of modes to the traces of one ionogram and that is subject to physical-admissibility validation."""@en .

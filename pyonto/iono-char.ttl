@@ -1,0 +1,215 @@
+@prefix iono:    <http://scilibai.ru/onto/iono#> .
+@prefix obo:  <http://purl.obolibrary.org/obo/> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+
+# =====================================================================
+#  iono-char.ttl — МОДУЛЬ ХАРАКТЕРИСТИК ИОНОГРАММЫ (0.2.0)
+#
+#  Расширяет ядро iono-core.ttl. Принцип тот же, что для мод в ядре:
+#  именованная характеристика (foF2, h'Es, fbEs …) — НЕ примитивная
+#  метка, а определяемый класс из ортогональных признаков:
+#  (вид величины) × (слой) × (компонента).
+#
+#  0.2.0 (по ревью 2026-09-03): foEs/ftEs выделены в «предельные»
+#  частоты (Ф-01 — у следа Es нет асимптоты, РД называет их предельными,
+#  §6.5.1.4, рис. 9, с. 53 печ.); fxI отделена от fxF2 (Ф-02); домены
+#  hasNumericValue/hasUnit/hasErrorEstimate подняты до MeasurementDatum
+#  (М-13); добавлена дизъюнктность видов величин (М-09); точная связь
+#  O/X-расщепления (Ф-03); исправлены ссылки на страницы (С-02, С-03,
+#  С-07, С-12, С-13, С-14).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/char> a owl:Ontology ;
+    rdfs:label "Модуль характеристик ионограммы"@ru ;
+    owl:imports <http://scilibai.ru/onto/iono> ;
+    dcterms:source "[РД2023], §6.5; URSI Handbook [UAG23A], гл. I–III" ;
+        rdfs:comment """Ключи источников в аннотациях: [РД2023] = РД 52.26.817–2023 «Проведение наблюдений за ионосферой...» (Росгидромет; печатная страница = страница PDF − 10); [UAG23A] = Piggott W.R., Rawer K. URSI Handbook of Ionogram Interpretation and Reduction, Rep. UAG-23A, NOAA, 1978; [Щирый2007] = Щирый А.О., дисс. канд. техн. наук, СПб., 2007; [ЛС2026] = Литвинов В.Л., Скрипачев В.О., монография по ионосферному зондированию, 2026; [Davies1990] = Davies K. Ionospheric Radio. IET, 1990; [SAO43] = SAO 4.3 (ulcar.uml.edu/~iag/SAO-4.3.htm); [ArpSmithSpear2015] = Arp R., Smith B., Spear A.D. Building Ontologies with BFO. MIT Press, 2015. Идентификаторы вида М-xx/Ф-xx/Ч-xx/T-xx/С-xx — находки пяти независимых ревью онтологии (методология/физика/читатель/техника/сверка источников, 2026-09-03; протокол решений — research/05-shiryi-merge.md)."""@ru ;
+    owl:versionInfo "0.2.0-prototype" .
+
+# ---------------------------------------------------------------------
+#  1. Виды величин (подклассы MeasurementDatum ядра)
+# ---------------------------------------------------------------------
+
+iono:CharacteristicDatum a owl:Class ;
+    rdfs:subClassOf iono:MeasurementDatum ;
+    rdfs:label "Характеристика ионограммы"@ru, "characteristic datum"@en ;
+    rdfs:comment "Числовой результат обработки ионограммы (значение + признаки: вид, слой, компонента). В SAO — группа 4 «scaled characteristics», в РД — §6.5.1 (с. 52–54 печ.)."@ru .
+
+iono:CriticalFrequencyDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Критическая частота (fo…, fx… слоя)"@ru, "critical frequency datum"@en ;
+    rdfs:comment "«Наивысшая частота, при которой слой не только отражает вертикально направленную радиоволну, но и пропускает её» ([РД2023] §3.25, с. 8 печ.; перечень — §6.5.1, с. 52–53 печ.). На ионограмме — асимптота следа слоя (E, F1, F2, F3). К Es НЕ применима (см. LimitFrequencyDatum, Ф-01)."@ru .
+
+iono:LimitFrequencyDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Предельная частота следа (foEs, ftEs)"@ru, "limit frequency datum"@en ;
+    rdfs:comment "Наибольшая частота, на которой наблюдается отражение от следа БЕЗ асимптотического запаздывания: след Es обрывается, а не уходит в асимптоту (именно отсутствие запаздывания отличает Es от типа r). [РД2023] §6.5.1.4, рис. 9, с. 53 печ.: foEs — «предельная частота обыкновенной радиоволны, отражающейся от Es». Введён по ревью Ф-01; поэтому Es не участвует в порядке критических частот (Q1) по определению, а не по фильтру."@ru .
+
+iono:TopFrequencyDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Верхняя огибающая частот области (fxI)"@ru, "top frequency datum"@en ;
+    rdfs:comment "fxI — «наибольшая частота, на которой имеются отражения от области F, НЕЗАВИСИМО от того, отражаются ли они над головой или при наклонном падении» ([РД2023] §4.1, с. 13–14 печ.). Это верхняя огибающая всех F-эхо, включая наклонные, а не свойство слоя: fxI ≥ fxF2, и fxI непригодна для пересчёта в foF2 (Ф-02). Критическая частота X-компоненты слоя — fxF2 — это CriticalFrequencyDatum с refersToComponent extraordinary."@ru .
+
+iono:BlanketingFrequencyDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Частота экранирования fbEs"@ru, "blanketing frequency datum"@en ;
+    rdfs:comment "Наибольшая частота, до которой слой Es экранирует (blanketing) вышележащие области; ниже fbEs след F отсутствует. [РД2023] §6.5.1; связь: fbEs ≤ foEs (форма Q2)."@ru .
+
+iono:MinObservedFrequencyDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Минимальная наблюдаемая частота (fmin, fminF, fminE)"@ru, "min observed frequency datum"@en ;
+    rdfs:comment "«Наименьшая частота, при которой наблюдаются следы отражений» ([РД2023] §6.5.1, с. 53 печ.). Зависит и от неотклоняющего поглощения в D-области, и от энергетического потенциала ионозонда (мощность, антенна, усиление) и помех — поэтому НЕ сопоставима между приборами; как мера поглощения годится только внутри одного прибора при неизменном усилении (Ф-05)."@ru .
+
+iono:MinVirtualHeightDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Минимальная действующая высота (h′…)"@ru, "min virtual height datum"@en ;
+    rdfs:comment "Минимальная действующая (виртуальная) высота следа: h′E, h′Es, h′F (области F в целом — Layer_F), h′F2. [РД2023] §4.1, с. 14–15 печ."@ru .
+
+iono:PeakVirtualHeightDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Действующая высота максимума hpF2"@ru, "peak virtual height datum"@en ;
+    rdfs:comment "Действующая высота следа O-компоненты на частоте 0,834·foF2; в приближении параболического слоя равна высоте максимума Ne слоя F2 (проверяется аналитически: h′(0.834·fo) = h_b + y_m·1.0018). Оговорки [РД2023] §6.5.7 (с. 71 печ.): (а) частота 0,834·foF2 должна быть ВЫШЕ частоты отсчёта h′F2, иначе hpF2 заменяется буквой G; (б) это ДЕЙСТВУЮЩАЯ высота: подстилающая ионизация E/F1 и долина систематически завышают её относительно hmF2 (днём — на десятки км). Также с. 15 печ. (определение)."@ru ;
+    skos:example "hpF2 = h′(0.834·foF2)" .
+
+iono:PeakTrueHeightDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Истинная высота максимума (hmF2, hmF1, hmE)"@ru, "peak true height datum"@en ;
+    rdfs:comment "Высота максимума электронной концентрации слоя по инверсии истинных высот (NHPC/POLAN). В РД напрямую не кодируется; стандарт обмена — SAO."@ru .
+
+iono:MUFDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Максимально применимая частота МПЧ(D)"@ru, "MUF datum"@en ;
+    rdfs:comment "МПЧ для трассы длины D. На НЗ — «особая точка ионограммы, в которой соединяются верхние и нижние геометрооптические лучи» ([РД2023] §6.5.6.2, с. 68 печ.); на ВЗ определяется методом кривых передачи — касанием стандартной кривой к следу O-компоненты (§6.5.6.3–6.5.6.4, с. 68–70 печ.), что делает M3000 фактически измерителем действующей высоты. Буквы U/описательные у foF2/foF1 «чаще всего повторяются» у МПЧ и M3000 (§6.5.6.5). Не путать с МНЧ моды (MOFDatum ядра — наблюдаемая частота конкретной моды на НЗ)."@ru .
+
+iono:MFactorDatum a owl:Class ;
+    rdfs:subClassOf iono:CharacteristicDatum ;
+    rdfs:label "Коэффициент M3000 (M3000F2, M3000F1)"@ru, "m factor datum"@en ;
+    rdfs:comment "Безразмерное отношение МПЧ к критической частоте слоя при наклонном падении на расстоянии скачка 3000 км: M3000F2 = МПЧ(3000)1F2/foF2. [РД2023] §6.5.1.5, с. 53 печ.; §6.5.6.3, с. 69 печ. Диапазон правдоподобия ≈ 2,2–3,7; hmF2 ≈ 1490/(M3000F2 + ΔM) − 176 (Ф-07в, вне РД)."@ru .
+
+# --- М-09: виды величин попарно несовместимы ---
+[] a owl:AllDisjointClasses ; owl:members (
+   iono:CriticalFrequencyDatum iono:LimitFrequencyDatum iono:TopFrequencyDatum
+   iono:BlanketingFrequencyDatum iono:MinObservedFrequencyDatum iono:MinVirtualHeightDatum
+   iono:PeakVirtualHeightDatum iono:PeakTrueHeightDatum iono:MUFDatum iono:MFactorDatum ) .
+
+# ---------------------------------------------------------------------
+#  2. Признаки характеристики
+# ---------------------------------------------------------------------
+
+iono:refersToLayer a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:subPropertyOf iono:isAboutLayer ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range iono:IonosphericLayer ;
+    rdfs:label "относится к слою"@ru, "refers to layer"@en ;
+    rdfs:comment "Слой/область (обозначения Layer_E, Layer_Es, Layer_F1, Layer_F2, Layer_F3, Layer_F, Layer_Ek). Признак ортогонален виду величины: foF2 = критическая частота × слой F2."@ru .
+
+iono:refersToComponent a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range iono:MagnetoionicComponent ;
+    rdfs:label "относится к магнитоионной компоненте"@ru, "refers to component"@en ;
+    rdfs:comment "ordinary для fo…, extraordinary для fx…; по умолчанию — обыкновенная. Точная связь компонент: fo² = fx·(fx − fB); приближение fx ≈ fo + fB/2 занижает fx − fo на fB²/(8·fo) и годится лишь при fo ≫ fB (Ф-03): при fB = 1,3 МГц ошибка 0,07 МГц уже на fo = 3 МГц."@ru .
+
+iono:isCharacteristicOf a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range iono:Ionogram ;
+    rdfs:label "снята с ионограммы"@ru, "is characteristic of"@en ;
+    rdfs:comment "Функционально (М-10): характеристика принадлежит ровно одной ионограмме; без этого ребра Q-формы объект не видят (страховка — форма H3)."@ru .
+
+iono:forHopDistanceKm a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range xsd:decimal ;
+    rdfs:label "для длины скачка, км"@ru, "for hop distance km"@en ;
+    rdfs:comment "Параметр D у МПЧ(D) и M-коэффициента; стандартное значение 3000 км. [РД2023] §6.5.1.5."@ru .
+
+# значения/единицы/ошибки — домен MeasurementDatum (М-13: применимы и к
+# реифицированным величинам ядра MOFDatum/LOFDatum/DelayDatum)
+iono:hasNumericValue a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:MeasurementDatum ; rdfs:range xsd:decimal ;
+    rdfs:label "числовое значение"@ru, "has numeric value"@en ;
+    rdfs:comment "В единицах hasUnit. Литерал строить ТОЛЬКО из строки/Decimal — numpy.float64 в xsd:decimal ломает арифметику SPARQL (T-01; форма H0). Может отсутствовать: тогда обязательна причина (hasNoValueCause) или заменяющая описательная буква (форма Q8)."@ru .
+
+iono:hasUnit a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:MeasurementDatum ; rdfs:range xsd:string ;
+    rdfs:label "единица измерения"@ru, "has unit"@en .
+
+iono:hasErrorEstimate a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:MeasurementDatum ; rdfs:range xsd:decimal ;
+    rdfs:label "оценка неточности ±ε (в единицах величины)"@ru, "has error estimate"@en ;
+    rdfs:comment "По ней [РД2023] §6.5.5 назначает класс точности и оценочную букву U (формы Q4–Q5)."@ru .
+
+# ---------------------------------------------------------------------
+#  3. Определяемые классы конкретных характеристик (выводятся ризонером)
+# ---------------------------------------------------------------------
+
+iono:Char_foF2 a owl:Class ; rdfs:label "foF2 — критическая частота обыкновенной волны слоя F2"@ru, "foF2 — F2-layer ordinary-wave critical frequency"@en ;
+    dcterms:source "[РД2023], §3.25 (определение), §6.5.1 с. 52–53 печ." ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:CriticalFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:LayerF2 ]
+        [ a owl:Restriction ; owl:onProperty iono:refersToComponent ; owl:hasValue iono:ordinary ] ) ] .
+
+iono:Char_fxF2 a owl:Class ; rdfs:label "fxF2 — критическая частота необыкновенной волны слоя F2"@ru, "fxF2 — F2-layer extraordinary-wave critical frequency"@en ;
+    rdfs:comment "Критическая частота X-компоненты слоя F2 (свойство слоя, в отличие от fxI). Ф-02."@ru ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:CriticalFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:LayerF2 ]
+        [ a owl:Restriction ; owl:onProperty iono:refersToComponent ; owl:hasValue iono:extraordinary ] ) ] .
+
+iono:Char_fxI a owl:Class ; rdfs:label "fxI — максимальная частота огибающей следов области F (X-волна)"@ru, "fxI — maximum frequency of the F-region echo envelope (X-wave)"@en ;
+    rdfs:comment "Верхняя огибающая всех отражений области F (включая наклонные). fxI ≥ fxF2 ≥ foF2."@ru ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:TopFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:FRegion ] ) ] .
+
+iono:Char_foF1 a owl:Class ; rdfs:label "foF1 — критическая частота обыкновенной волны слоя F1"@ru, "foF1 — F1-layer ordinary-wave critical frequency"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:CriticalFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:LayerF1 ]
+        [ a owl:Restriction ; owl:onProperty iono:refersToComponent ; owl:hasValue iono:ordinary ] ) ] .
+
+iono:Char_foE a owl:Class ; rdfs:label "foE — критическая частота обыкновенной волны слоя E"@ru, "foE — E-layer ordinary-wave critical frequency"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:CriticalFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:LayerE ]
+        [ a owl:Restriction ; owl:onProperty iono:refersToComponent ; owl:hasValue iono:ordinary ] ) ] .
+
+iono:Char_foEs a owl:Class ; rdfs:label "foEs — предельная частота обыкновенной волны слоя Es"@ru, "foEs — Es-layer ordinary-wave limit frequency"@en ;
+    dcterms:source "[РД2023], §6.5.1.4, рис. 9, с. 53 печ. («предельная частота»)" ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:LimitFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:SporadicELayer ]
+        [ a owl:Restriction ; owl:onProperty iono:refersToComponent ; owl:hasValue iono:ordinary ] ) ] .
+
+iono:Char_ftEs a owl:Class ; rdfs:label "ftEs — верхняя предельная частота следа Es"@ru, "ftEs — Es-trace top frequency"@en ;
+    rdfs:comment "Предельная частота отражения от Es (верхняя, по обеим компонентам). [РД2023] §6.5.1.4."@ru ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:LimitFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:SporadicELayer ]
+        [ a owl:Restriction ; owl:onProperty iono:refersToComponent ; owl:hasValue iono:extraordinary ] ) ] .
+
+iono:Char_fbEs a owl:Class ; rdfs:label "fbEs — частота экранирования слоем Es"@ru, "fbEs — Es blanketing frequency"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:BlanketingFrequencyDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:SporadicELayer ] ) ] .
+
+iono:Char_hF a owl:Class ; rdfs:label "h′F — минимальная действующая высота области F"@ru, "h′F — minimum virtual height of the F region"@en ;
+    rdfs:comment "Минимальная действующая высота области F, взятой в целом (Layer_F). Штатная ночная величина."@ru ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:MinVirtualHeightDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:FRegion ] ) ] .
+
+iono:Char_hpF2 a owl:Class ; rdfs:label "hpF2 — действующая высота на 0.834·foF2 (оценка высоты максимума F2)"@ru, "hpF2 — virtual height at 0.834·foF2 (hmF2 proxy)"@en ;
+    dcterms:source "[РД2023], с. 15 печ. (определение), §6.5.7 с. 71 печ. (метод и оговорки)" ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:PeakVirtualHeightDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:LayerF2 ] ) ] .
+
+iono:Char_M3000F2 a owl:Class ; rdfs:label "M3000F2 — передаточный коэффициент МПЧ(3000 км)/foF2"@ru, "M3000F2 — MUF(3000)/foF2 transmission factor"@en ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:MFactorDatum
+        [ a owl:Restriction ; owl:onProperty iono:refersToLayer ; owl:someValuesFrom iono:LayerF2 ] ) ] .
+
+# --- канонические определения (IAO definition; род + видовое отличие) — 2026-09-05 ---
+iono:CharacteristicDatum obo:IAO_0000115 """Характеристика ионосферы — данное измерения, которое относится к определённому слою и магнитоионной компоненте и которое таблицируется по правилам [РД2023]."""@ru , """An ionospheric characteristic is a measurement datum that refers to a specific layer and magnetoionic component and that is tabulated according to [РД2023]."""@en .
+iono:CriticalFrequencyDatum obo:IAO_0000115 """Критическая частота — характеристика, которая равна частоте, при которой обыкновенная волна перестаёт отражаться от слоя (след уходит в асимптоту), и которая определена только для регулярных слоёв E, F1, F2 ([РД2023] §3.25)."""@ru , """A critical frequency is a characteristic that equals the frequency at which the ordinary wave ceases to be reflected by a layer (the trace becomes asymptotic) and that is defined only for the regular layers E, F1, F2."""@en .
+iono:LimitFrequencyDatum obo:IAO_0000115 """Предельная частота — характеристика, которая равна частоте обрыва следа без асимптотического поведения (случай Es: экранирование или прозрачность, а не критичность)."""@ru , """A limit frequency is a characteristic that equals the frequency at which a trace terminates without asymptotic behaviour (the Es case: blanketing or transparency rather than criticality)."""@en .

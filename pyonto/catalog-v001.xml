@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+    <group id="Folder Repository, directory=, recursive=false, Auto-Update=false, version=2" prefer="public" xml:base="">
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-core.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/char" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-char.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/quality" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-quality.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/es" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-es.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/phenomena" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-phenomena.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/observation" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-observation.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/all" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-all.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/shapes" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-shapes.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/shapes-ext" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-shapes-ext.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/shapes-hygiene" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-shapes-hygiene.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/shapes-quality" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-shapes-quality.ttl"/>
+    <uri id="Imports Wizard Entry" name="http://scilibai.ru/onto/iono/shapes-vs" uri="file:///Users/andreykhalov/HULK/PHD/conferences/2026/vitebsk/research_ionogramms/pyonto/iono-shapes-vs.ttl"/>
+    </group>
+</catalog>

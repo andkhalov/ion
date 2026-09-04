@@ -1,0 +1,51 @@
+@prefix iono: <http://scilibai.ru/onto/iono#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+
+<http://scilibai.ru/onto/iono/shapes-ext> a owl:Ontology ;
+    rdfs:label "SHACL-форма S6 (педерсеновский луч, НЗ)"@ru ;
+    owl:versionInfo "0.3.0-prototype" .
+
+
+# =====================================================================
+#  iono-shapes-ext.ttl — расширение набора форм одним ограничением.
+#
+#  Файл существует, чтобы показать: расширение системы ограничений
+#  выполняется добавлением декларативного описания, без переобучения
+#  и без правки кода конвейера (требование расширяемости словаря мод).
+# =====================================================================
+
+iono:IonogramInterpretationShapeExt a sh:NodeShape ;
+    sh:targetClass iono:Ionogram ;
+    rdfs:label "Дополнительное ограничение: задержка верхнего луча"@ru ;
+
+    # -----------------------------------------------------------------
+    # S6. При одной кратности и одном отражающем слое групповая задержка
+    # верхнего (педерсеновского) луча превышает задержку нижнего: верхний
+    # луч проходит более длинный путь, поднимаясь выше в слое, и оба луча
+    # сходятся только в точке каустики, где задержки совпадают.
+    # Оговорка (Ф-20): форма корректна при семантике «минимальная задержка по
+    # всему следу» — у носа лучи сливаются и строгое неравенство держится
+    # именно за счёт минимума нижнего луча в середине диапазона.
+    # -----------------------------------------------------------------
+    sh:sparql [
+        a sh:SPARQLConstraint ;
+        sh:message "S6: задержка верхнего луча {?mu} не превышает задержку нижнего луча {?ml} той же кратности"@ru ;
+        sh:severity sh:Violation ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this ?mu ?ml WHERE {
+              ?t1 iono:isTraceIn $this ; iono:denotes ?mu .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?ml .
+              ?mu iono:hasRayType iono:upperRay ; iono:hasHopCount ?n ;
+                  iono:hasMinDelayValue ?du ; iono:reflectsFromLayer ?L .
+              ?ml iono:hasRayType iono:lowerRay ; iono:hasHopCount ?n ;
+                  iono:hasMinDelayValue ?dl ; iono:reflectsFromLayer ?L .
+              FILTER (?du < ?dl - 0.01)
+            }
+        """ ] .
+
+iono: sh:declare [ sh:prefix "iono" ; sh:namespace "http://scilibai.ru/onto/iono#"^^xsd:anyURI ] .

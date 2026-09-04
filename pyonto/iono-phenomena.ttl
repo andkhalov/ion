@@ -1,0 +1,115 @@
+@prefix iono:    <http://scilibai.ru/onto/iono#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix obo:     <http://purl.obolibrary.org/obo/> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# =====================================================================
+#  iono-phenomena.ttl — МОДУЛЬ ЯВЛЕНИЙ, ВЛИЯЮЩИХ НА ИНТЕРПРЕТАЦИЮ (0.2.0)
+#
+#  Явления — процессы (BFO occurrent), проявляющиеся на ионограмме и
+#  объясняющие буквы/причины. [РД2023] §6.5.3 (F-рассеяние, ПЯТЬ типов:
+#  F, Q1, Q, L, P — Ф-23), §6.5.4 (буквы), §6.6.1 табл. 4 (цифры типов
+#  рассеяния: 6=F 7=P 8=Q 9=L).
+#
+#  0.2.0: добавлены Q1/L/P-рассеяние и цифры ИОНКА (Ф-23); связи
+#  «явление → буква/причина» ЗАПОЛНЕНЫ (Ф-24; классы связаны через
+#  punning — класс как индивид, законно в OWL 2); поглощение разведено
+#  на неотклоняющее/отклоняющее (Ф-25); порог 30 км признан
+#  НОРМАТИВНЫМ (С-01/Ф-22, [РД2023] §6.5.3.4); цепочка explainsCause ⊇
+#  explainsLetter ∘ correspondsToCause (М-16).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/phenomena> a owl:Ontology ;
+    rdfs:label "Модуль ионосферных явлений на ионограмме"@ru ;
+    owl:imports <http://scilibai.ru/onto/iono> , <http://scilibai.ru/onto/iono/quality> ;
+    dcterms:source "[РД2023], §6.5.3–6.5.4, §6.6.1" ;
+        rdfs:comment """Ключи источников в аннотациях: [РД2023] = РД 52.26.817–2023 «Проведение наблюдений за ионосферой...» (Росгидромет; печатная страница = страница PDF − 10); [UAG23A] = Piggott W.R., Rawer K. URSI Handbook of Ionogram Interpretation and Reduction, Rep. UAG-23A, NOAA, 1978; [Щирый2007] = Щирый А.О., дисс. канд. техн. наук, СПб., 2007; [ЛС2026] = Литвинов В.Л., Скрипачев В.О., монография по ионосферному зондированию, 2026; [Davies1990] = Davies K. Ionospheric Radio. IET, 1990; [SAO43] = SAO 4.3 (ulcar.uml.edu/~iag/SAO-4.3.htm); [ArpSmithSpear2015] = Arp R., Smith B., Spear A.D. Building Ontologies with BFO. MIT Press, 2015. Идентификаторы вида М-xx/Ф-xx/Ч-xx/T-xx/С-xx — находки пяти независимых ревью онтологии (методология/физика/читатель/техника/сверка источников, 2026-09-03; протокол решений — research/05-shiryi-merge.md)."""@ru ;
+    owl:versionInfo "0.2.0-prototype" .
+
+iono:IonogramPhenomenon a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000015 ;
+    rdfs:label "Явление, проявляющееся на ионограмме"@ru, "ionogram phenomenon"@en .
+
+iono:manifestsOn a owl:ObjectProperty ;
+    rdfs:domain iono:IonogramPhenomenon ; rdfs:range iono:Ionogram ;
+    rdfs:label "проявляется на ионограмме"@ru, "manifests on"@en .
+
+iono:explainsLetter a owl:ObjectProperty ;
+    rdfs:range iono:DescriptiveLetter ;
+    rdfs:label "объясняет описательную букву"@ru, "explains letter"@en ;
+    rdfs:comment "Субъект — класс явления (punning) или его экземпляр."@ru .
+
+iono:explainsCause a owl:ObjectProperty ;
+    rdfs:range iono:NoValueCause ;
+    rdfs:label "объясняет причину отсутствия"@ru, "explains cause"@en ;
+    owl:propertyChainAxiom ( iono:explainsLetter iono:correspondsToCause ) .
+
+iono:spreadTypeIonkaDigit a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:range xsd:integer ;
+    rdfs:label "цифра типа рассеяния в коде ИОНКА"@ru, "spread type IONKA digit"@en ;
+    rdfs:comment "РД §6.6.1, табл. 4, группа 7: 6=F (частотное), 7=P (шпора), 8=Q (диапазонное), 9=L (смешанное)."@ru .
+
+# --- F-рассеяние: пять типов [РД2023] §6.5.3 ---
+iono:SpreadF a owl:Class ; rdfs:subClassOf iono:IonogramPhenomenon ;
+    rdfs:label "F-рассеяние (spread-F)"@ru, "spread f"@en ;
+    rdfs:comment "Диффузность отражений от области F из-за мелкомасштабных (≤2–3 км) неоднородностей; следы размыты, наблюдаются ниже/выше реальной критической частоты. Самый частый и трудный для интерпретации вид; главная причина отказов автоскейлинга (ночные пропуски ARTIST у Jicamarca). [РД2023] §6.5.3.1, с. 58 печ."@ru ;
+    iono:explainsLetter iono:DL_F .
+
+iono:FrequencySpreadF a owl:Class ; rdfs:subClassOf iono:SpreadF ;
+    rdfs:label "частотное F-рассеяние (тип F)"@ru, "frequency spread f"@en ;
+    iono:explainsLetter iono:DL_F ; iono:spreadTypeIonkaDigit 6 ;
+    rdfs:comment "Следы расширены по частоте ВБЛИЗИ критических частот ([РД2023] §6.5.3.2, рис. 16). Числового порога РД не задаёт; рабочее значение прототипа «> 0,3 МГц» (Щирый/RDSWRL R044) — реконструкция, подлежит калибровке. Класс FSF датасета Hainan."@ru .
+
+iono:Q1SpreadF a owl:Class ; rdfs:subClassOf iono:SpreadF ;
+    rdfs:label "Q1-рассеяние (дополнительные следы)"@ru, "q1 spread f"@en ;
+    iono:explainsLetter iono:DL_F ;
+    rdfs:comment "Дополнительные следы, подобные нормальному, ниже foF2, на фоне рассеяния типа F. [РД2023] §6.5.3.3, с. 59 печ. (Ф-23)."@ru .
+
+iono:RangeSpreadF a owl:Class ; rdfs:subClassOf iono:SpreadF ;
+    rdfs:label "диапазонное (по дальности) F-рассеяние (тип Q)"@ru, "range spread f"@en ;
+    iono:explainsLetter iono:DL_Q ; iono:spreadTypeIonkaDigit 8 ;
+    rdfs:comment "Следы ВДАЛИ от критической частоты расширены по высоте, и диапазон рассеяния ПРЕВЫШАЕТ 30 КМ — порог НОРМАТИВНЫЙ ([РД2023] §6.5.3.4, с. 59–60 печ.; исправлено по С-01/Ф-22: прежняя пометка «реконструкция LLM» была ошибкой). Класс RSF датасета Hainan; типично для ночного экватора."@ru .
+
+iono:MixedSpreadF a owl:Class ; rdfs:subClassOf iono:SpreadF ;
+    rdfs:label "смешанное F-рассеяние (тип L)"@ru, "mixed spread f"@en ;
+    iono:explainsLetter iono:DL_F ; iono:spreadTypeIonkaDigit 9 ;
+    rdfs:comment "Одновременно частотное и диапазонное. [РД2023] §6.5.3.5 (Ф-23). Аналог класса MSF датасета Hainan."@ru .
+
+iono:SpurSpreadF a owl:Class ; rdfs:subClassOf iono:SpreadF ;
+    rdfs:label "рассеяние типа полярной шпоры (тип P)"@ru, "spur spread f"@en ;
+    iono:explainsLetter iono:DL_P ; iono:spreadTypeIonkaDigit 7 ;
+    rdfs:comment "Следы от наклонов отражающей области, простирающиеся выше по частоте, чем следы от F над головой; при подходе структуры к пункту переходит в типы F и Q. [РД2023] §6.5.3.6 (Ф-23)."@ru .
+
+# --- прочие явления ---
+iono:EsBlanketing a owl:Class ; rdfs:subClassOf iono:IonogramPhenomenon ;
+    rdfs:label "Экранирование слоем Es"@ru, "Es blanketing"@en ;
+    iono:explainsLetter iono:DL_A ; iono:explainsCause iono:NVC_1 ;
+    rdfs:comment "Ниже fbEs слой Es экранирует вышележащие области: след F отсутствует. Буква A; причина 1 (ИОНКА); в оценочных — A у fbEs при полном экранировании. [РД2023] §6.5.4."@ru .
+
+iono:AbsorptionEvent a owl:Class ; rdfs:subClassOf iono:IonogramPhenomenon ;
+    rdfs:label "Повышенное поглощение"@ru, "absorption event"@en ;
+    rdfs:comment "Надкласс; вид определяется местом поглощения (Ф-25)."@ru .
+iono:NonDeviativeAbsorption a owl:Class ; rdfs:subClassOf iono:AbsorptionEvent ;
+    rdfs:label "неотклоняющее поглощение"@ru, "non deviative absorption"@en ;
+    iono:explainsLetter iono:DL_B ; iono:explainsCause iono:NVC_2 ;
+    rdfs:comment "В области, где μ ≈ 1 (D-область, 60–90 км); ∝ 1/f²; проявляется ростом fmin. Буква B, причина 2 (ИОНКА)."@ru .
+iono:DeviativeAbsorption a owl:Class ; rdfs:subClassOf iono:AbsorptionEvent ;
+    rdfs:label "отклоняющее поглощение"@ru, "deviative absorption"@en ;
+    iono:explainsLetter iono:DL_R ; iono:explainsCause iono:NVC_9 ;
+    rdfs:comment "Там, где μ → 0 — у уровня отражения и в областях большого группового запаздывания ([UAG23A] §4.6: запаздывание на fminF — его признак; съедает перегиб Es типа c). Буква R, причина 9."@ru .
+
+iono:LacunaPhenomenon a owl:Class ; rdfs:subClassOf iono:IonogramPhenomenon ;
+    rdfs:label "Лакуна (прерывистый след, наклон области)"@ru, "lacuna phenomenon"@en ;
+    iono:explainsLetter iono:DL_Y ;
+    rdfs:comment "Разрывы следа, СИЛЬНЫЙ НАКЛОН области, аномальный ход вблизи foF2 ([РД2023] §6.5.4.3, буква Y); в [UAG23A] §2.75 — высокоширотное явление исчезновения участка F-следа при наклоне/градиенте. Практическое правило [UAG23A] §4.6 (рис. 4.22): частотный разрыв между следами Es и F из-за наклона ⇒ fbEs = Y (или foEs с U и описательной Y), а не пропуск (Ф-33)."@ru .
+
+iono:ObliqueEchoPhenomenon a owl:Class ; rdfs:subClassOf iono:IonogramPhenomenon ;
+    rdfs:label "Наклонные (боковые) отражения на ВЗ-ионограмме"@ru, "oblique echo phenomenon"@en ;
+    iono:explainsLetter iono:DL_N ;
+    rdfs:seeAlso iono:OffGreatCircleMode ;
+    rdfs:comment "Отражения от боковых неоднородностей, затрудняющие интерпретацию (буква N). На DPS-4D выявляются интерферометрическим углом прихода (данные направлений в формате RSF — не путать с range-spread-F из датасета Hainan, тоже сокращаемым «RSF»; Ф-34). Модовый аналог в ядре — iono:OffGreatCircleMode."@ru .
+
+# --- канонические определения (IAO definition; род + видовое отличие) — 2026-09-05 ---
+iono:SpreadF obo:IAO_0000115 """F-рассеяние — явление на ионограмме, которое является диффузным расширением следа области F и которое вызвано неоднородностями ионосферной плазмы ([РД2023] §6.5.3)."""@ru , """Spread-F is an ionogram phenomenon that is a diffuse broadening of the F-region trace and that is caused by ionospheric plasma irregularities."""@en .

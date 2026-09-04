@@ -1,0 +1,167 @@
+@prefix iono:    <http://scilibai.ru/onto/iono#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix obo:     <http://purl.obolibrary.org/obo/> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# =====================================================================
+#  iono-observation.ttl — МОДУЛЬ НАБЛЮДАТЕЛЬНОГО КОНТУРА (0.2.0)
+#
+#  Пункт наблюдений, ионозонд, виды зондирования, ВЗ/НЗ-ионограммы,
+#  выходные информационные артефакты (урсиграммы, графики, таблицы).
+#
+#  0.2.0 (по ревью): время наблюдения (Ч-11); классы VerticalIonogram /
+#  ObliqueIonogram, выводимые из порождающего сеанса — основа корректного
+#  таргетинга ВЗ/НЗ-форм (Ч-01, Ф-11, T-03); гирочастота консолидирована
+#  здесь (М-14, Ч-05): hasGyroFrequency (снимок ионограммы) переехал из
+#  файла форм, hasStationGyroFrequency — константа пункта на 100 км;
+#  функциональность связей (М-10); исправлены ссылки §6.3, §6.6.1,
+#  §6.6.3 (С-04, С-08, С-09); источник «10 СП» указан (С-19).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/observation> a owl:Ontology ;
+    rdfs:label "Модуль наблюдательного контура"@ru ;
+    owl:imports <http://scilibai.ru/onto/iono> ;
+    dcterms:source "[РД2023], §6.3 (аппаратура), §6.6 (представление данных), §7 (НЗ)" ;
+        rdfs:comment """Ключи источников в аннотациях: [РД2023] = РД 52.26.817–2023 «Проведение наблюдений за ионосферой...» (Росгидромет; печатная страница = страница PDF − 10); [UAG23A] = Piggott W.R., Rawer K. URSI Handbook of Ionogram Interpretation and Reduction, Rep. UAG-23A, NOAA, 1978; [Щирый2007] = Щирый А.О., дисс. канд. техн. наук, СПб., 2007; [ЛС2026] = Литвинов В.Л., Скрипачев В.О., монография по ионосферному зондированию, 2026; [Davies1990] = Davies K. Ionospheric Radio. IET, 1990; [SAO43] = SAO 4.3 (ulcar.uml.edu/~iag/SAO-4.3.htm); [ArpSmithSpear2015] = Arp R., Smith B., Spear A.D. Building Ontologies with BFO. MIT Press, 2015. Идентификаторы вида М-xx/Ф-xx/Ч-xx/T-xx/С-xx — находки пяти независимых ревью онтологии (методология/физика/читатель/техника/сверка источников, 2026-09-03; протокол решений — research/05-shiryi-merge.md)."""@ru ;
+    owl:versionInfo "0.2.0-prototype" .
+
+# --- пункт и прибор ---
+iono:ObservationStation a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000040 ;
+    rdfs:label "Стационарный пункт (СП) ионосферных наблюдений"@ru, "observation station"@en .
+
+iono:hasUrsiCode a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:ObservationStation ; rdfs:range xsd:string ;
+    rdfs:label "URSI-код пункта"@ru, "has URSI code"@en ;
+    rdfs:comment "Пятисимвольный код (MO155, JI91J…); используется в именах файлов и каталогах GIRO/NOAA."@ru .
+
+iono:hasStationLatitude a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:ObservationStation ; rdfs:range xsd:decimal ;
+    rdfs:label "географическая широта, град"@ru, "has station latitude"@en .
+iono:hasStationLongitude a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:ObservationStation ; rdfs:range xsd:decimal ;
+    rdfs:label "географическая долгота, град"@ru, "has station longitude"@en .
+
+iono:hasStationGyroFrequency a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:ObservationStation ; rdfs:range xsd:decimal ;
+    rdfs:label "гирочастота электронов на высоте 100 км над пунктом (IGRF), МГц"@ru, "has station gyro frequency"@en ;
+    rdfs:comment "0.2.0 (Ф-04): fB зависит от высоты как (1 + h/R)⁻³ — между 100 и 300 км падает на ~9 %; для форм по F-модам умножайте на ≈0,89 (hmF2 ≈ 300 км) либо задавайте hasGyroFrequency на ионограмме явно. Для НЗ нужна fB в точке отражения (середина трассы), а не на станции."@ru .
+
+iono:hasGyroFrequency a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:Ionogram ; rdfs:range xsd:decimal ;
+    rdfs:label "гирочастота, принятая для данной ионограммы, МГц"@ru, "has gyro frequency"@en ;
+    rdfs:comment "0.2.0: объявление перенесено сюда из файла форм (М-14/Ч-05 — T-Box не место в SHACL-файле). Снимок-уровневое переопределение станционной константы; используется формой V4. Если не задано — V4 не проверяется (форма V4w предупреждает)."@ru .
+
+iono:Ionosonde a owl:Class ;
+    rdfs:subClassOf obo:BFO_0000040 ;
+    rdfs:label "Ионозонд"@ru, "ionosonde"@en ;
+    rdfs:comment "Импульсный или ЛЧМ ВЧ-радар зондирования ионосферы. [РД2023] §6.3 (средства наблюдений: §6.3.2 «Парус-А» с. 29–41 печ., §6.3.3 CADI с. 42–47 печ.); обзор приборов — [ЛС2026] §1.2."@ru .
+
+iono:IonosondeModel a owl:Class ;
+    rdfs:subClassOf obo:IAO_0000030 ;
+    rdfs:label "Модель ионозонда (обозначение типа прибора)"@ru, "ionosonde model"@en ;
+    rdfs:comment "Информационная сущность-спецификация (М-05), не партикуляр."@ru .
+iono:hasModel a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:Ionosonde ; rdfs:range iono:IonosondeModel ; rdfs:label "модель прибора"@ru, "has model"@en .
+iono:Model_DPS4 a owl:NamedIndividual , iono:IonosondeModel ; rdfs:label "DPS-4/DPS-4D (Lowell)"@ru, "ionosonde model DPS-4/4D"@en ;
+    rdfs:comment "Дигизонд: 4 приёмные антенны, O/X, доплер, азимут; форматы RSF/SBF/SAO."@ru .
+iono:Model_ParusA a owl:NamedIndividual , iono:IonosondeModel ; rdfs:label "«Парус-А» (ИПГ/ИЗМИРАН)"@ru, "ionosonde model Parus-A"@en ;
+    rdfs:comment "Штатный ионозонд сети Росгидромета; 10 СП по данным монографии Литвинова/Скрипачева (2026), табл. 1.4 (С-19: числа в РД нет). [РД2023] §6.3.2."@ru .
+iono:Model_CADI a owl:NamedIndividual , iono:IonosondeModel ; rdfs:label "CADI (Канада)"@ru, "ionosonde model CADI"@en ;
+    rdfs:comment "РД §6.3.3."@ru .
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:Model_DPS4 iono:Model_ParusA iono:Model_CADI ) .
+
+iono:performedAtStation a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:SoundingSession ; rdfs:range iono:ObservationStation ;
+    rdfs:label "выполнен на пункте"@ru, "performed at station"@en .
+iono:usesInstrument a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:SoundingSession ; rdfs:range iono:Ionosonde ;
+    rdfs:label "использует ионозонд"@ru, "uses instrument"@en .
+iono:producesIonogram a owl:ObjectProperty ;
+    rdfs:domain iono:SoundingSession ; rdfs:range iono:Ionogram ;
+    rdfs:label "порождает ионограмму"@ru, "produces ionogram"@en .
+iono:producedBy a owl:ObjectProperty ; owl:inverseOf iono:producesIonogram ;
+    rdfs:domain iono:Ionogram ; rdfs:range iono:SoundingSession ;
+    rdfs:label "порождена сеансом"@ru, "produced by"@en .
+
+# --- время наблюдения (Ч-11) ---
+iono:hasObservationTime a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:Ionogram ; rdfs:range xsd:dateTime ;
+    rdfs:label "время наблюдения (UT)"@ru, "has observation time"@en ;
+    rdfs:comment "Момент зондирования. Без него непроверяемы буквы T (значение из ряда наблюдений) и невозможен временной контекст интерпретации ([РД2023] §7.3.2)."@ru .
+iono:hasSessionStart a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:SoundingSession ; rdfs:range xsd:dateTime ;
+    rdfs:label "начало сеанса (UT)"@ru, "has session start"@en .
+
+# --- виды зондирования (подклассы сеанса из ядра) ---
+iono:VerticalSounding a owl:Class ; rdfs:subClassOf iono:SoundingSession ;
+    rdfs:label "Вертикальное зондирование (ВЗ)"@ru, "vertical sounding"@en ;
+    rdfs:comment "Tx и Rx совмещены, излучение вертикально; результат — зависимость h′(f). [РД2023] §6."@ru .
+iono:ObliqueSounding a owl:Class ; rdfs:subClassOf iono:SoundingSession ;
+    rdfs:label "Наклонное зондирование (НЗ)"@ru, "oblique sounding"@en ;
+    rdfs:comment "Tx и Rx разнесены (паспорт трассы — iono:RadioPath); результат — распределение сигнала «частота × групповая задержка». [РД2023] §7."@ru .
+iono:BackscatterSounding a owl:Class ; rdfs:subClassOf iono:SoundingSession ;
+    rdfs:label "Возвратно-наклонное зондирование (ВНЗ)"@ru, "backscatter sounding"@en .
+iono:TopsideSounding a owl:Class ; rdfs:subClassOf iono:SoundingSession ;
+    rdfs:label "Внешнее (спутниковое) зондирование"@ru, "topside sounding"@en .
+iono:TransionosphericSounding a owl:Class ; rdfs:subClassOf iono:SoundingSession ;
+    rdfs:label "Трансионосферное зондирование"@ru, "transionospheric sounding"@en .
+iono:CombinedSounding a owl:Class ; rdfs:subClassOf iono:SoundingSession ;
+    rdfs:label "Совмещённое (ВЗ + НЗ) зондирование"@ru, "combined sounding"@en ;
+    rdfs:comment "Оба ионозонда с включёнными передатчиками; на одной ионограмме следы ВЗ и НЗ. [ЛС2026] §1.1.7. Намеренно НЕ дизъюнктно с VerticalSounding/ObliqueSounding."@ru .
+[] a owl:AllDisjointClasses ; owl:members (
+   iono:VerticalSounding iono:ObliqueSounding iono:BackscatterSounding
+   iono:TopsideSounding iono:TransionosphericSounding ) .
+
+# --- ВЗ/НЗ-ионограммы (Ч-01, Ф-11, T-03): выводятся из сеанса ризонером,
+#     либо типизируются напрямую при отсутствии описания сеанса ---
+iono:VerticalIonogram a owl:Class ; rdfs:subClassOf iono:Ionogram ; rdfs:label "Ионограмма ВЗ"@ru, "vertical ionogram"@en ;
+    rdfs:comment "Таргет ВЗ-форм (V3–V4, Q1–Q7). Выводится из producedBy VerticalSounding; в данных без сеанса — типизировать напрямую."@ru ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:Ionogram
+        [ a owl:Restriction ; owl:onProperty iono:producedBy ; owl:someValuesFrom iono:VerticalSounding ] ) ] .
+iono:ObliqueIonogram a owl:Class ; rdfs:subClassOf iono:Ionogram ; rdfs:label "Ионограмма НЗ"@ru, "oblique ionogram"@en ;
+    rdfs:comment "Таргет НЗ-форм (S1–S6). Выводится из producedBy ObliqueSounding; в данных без сеанса — типизировать напрямую."@ru ;
+    owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+        iono:Ionogram
+        [ a owl:Restriction ; owl:onProperty iono:producedBy ; owl:someValuesFrom iono:ObliqueSounding ] ) ] .
+
+# --- выходные информационные артефакты (§6.6, §7.3.4–7.3.5) ---
+iono:ReportArtifact a owl:Class ; rdfs:subClassOf obo:IAO_0000030 ;
+    rdfs:label "Выходной артефакт обработки"@ru, "report artifact"@en .
+
+iono:Ursigram a owl:Class ; rdfs:subClassOf iono:ReportArtifact ;
+    rdfs:label "Урсиграмма"@ru, "ursigram"@en ;
+    rdfs:comment "Кодированная телеграмма с результатами наблюдений."@ru .
+iono:IonkaTelegram a owl:Class ; rdfs:subClassOf iono:Ursigram ;
+    rdfs:label "Урсиграмма ИОНКА"@ru, "IONKA telegram"@en ;
+    rdfs:comment "Результаты обработки ионограммы ВЗ; 13 групп; коды причин отсутствия — модуль quality. [РД2023] §6.6.1, с. 72–75 печ. (С-08)."@ru .
+iono:UsfreTelegram a owl:Class ; rdfs:subClassOf iono:Ursigram ;
+    rdfs:label "Урсиграмма УСФРЕ (данные НЗ)"@ru, "USFRE telegram"@en ;
+    rdfs:comment "РД §7.3.4 (стандартный код, 6 групп, с. 104 печ.) и §7.3.5 (расширенный, 16 групп, с. 106 печ.; помодовые МНЧ/ННЧ; составляется ежечасно не позднее 10-й минуты, §7.3.4.3/§7.3.5.3)."@ru .
+iono:StandardUsfre a owl:Class ; rdfs:subClassOf iono:UsfreTelegram ; rdfs:label "стандартный код УСФРЕ"@ru, "standard USFRE"@en .
+iono:ExtendedUsfre a owl:Class ; rdfs:subClassOf iono:UsfreTelegram ; rdfs:label "расширенный код УСФРЕ"@ru, "extended USFRE"@en .
+
+iono:FGraph a owl:Class ; rdfs:subClassOf iono:ReportArtifact ;
+    rdfs:label "Суточный частотный график (f-график)"@ru, "f(t) plot (frequency chart)"@en ;
+    rdfs:comment "Суточный ход частотных характеристик; внизу — шкала типов Es. Значок значения зависит от букв (§6.6.3-г, с. 84 печ.): при оценочном И описательном символах fo/fx наносятся заполненным кружком; буквам E и D соответствует иной значок (С-09)."@ru .
+iono:HGraph a owl:Class ; rdfs:subClassOf iono:ReportArtifact ;
+    rdfs:label "Суточный высотный график (h-график)"@ru, "h′(t) plot (height chart)"@en ;
+    rdfs:comment "РД §6.6.4."@ru .
+iono:DailyTable a owl:Class ; rdfs:subClassOf iono:ReportArtifact ;
+    rdfs:label "Суточная таблица"@ru, "daily table"@en ; rdfs:comment "Ежечасные значения характеристик; до трёх типов Es (3-й без кратности). [РД2023] §6.6.5, с. 87–89 печ."@ru .
+iono:MonthlyTable a owl:Class ; rdfs:subClassOf iono:ReportArtifact ;
+    rdfs:label "Месячная таблица"@ru, "monthly table"@en ; rdfs:comment "РД §6.6.6, с. 89 печ."@ru .
+
+iono:reportsSession a owl:ObjectProperty ;
+    rdfs:domain iono:ReportArtifact ; rdfs:range iono:SoundingSession ;
+    rdfs:label "представляет сеанс(ы) зондирования"@ru, "reports session"@en .
+
+# --- канонические определения (IAO definition; род + видовое отличие) — 2026-09-05 ---
+iono:SoundingSession obo:IAO_0000115 """Сеанс зондирования — процесс, который является одним циклом излучения и приёма зондирующих сигналов и который порождает одну или несколько ионограмм."""@ru , """A sounding session is a process that is one cycle of transmitting and receiving sounding signals and that produces one or more ionograms."""@en .
+iono:VerticalIonogram obo:IAO_0000115 """Ионограмма ВЗ — ионограмма, которая порождена сеансом вертикального зондирования (передатчик и приёмник совмещены)."""@ru , """A vertical-incidence ionogram is an ionogram that is produced by a vertical sounding session (co-located transmitter and receiver)."""@en .
+iono:ObliqueIonogram obo:IAO_0000115 """Ионограмма НЗ — ионограмма, которая порождена сеансом наклонного зондирования (передатчик и приёмник разнесены по трассе)."""@ru , """An oblique-incidence ionogram is an ionogram that is produced by an oblique sounding session (transmitter and receiver separated along a path)."""@en .
+iono:Ionosonde obo:IAO_0000115 """Ионозонд — материальная сущность (BFO material entity), которая является ВЧ-радаром, предназначенным для зондирования ионосферы импульсными или ЛЧМ-сигналами."""@ru , """An ionosonde is a material entity that is an HF radar designed to sound the ionosphere with pulsed or chirp signals."""@en .
+iono:RadioPath obo:IAO_0000115 """Радиотрасса — материальная сущность, которая является парой географических пунктов «передатчик–приёмник» с фиксированной дальностью, на которой выполняется наклонное зондирование."""@ru , """A radio path is a material entity that is a transmitter-receiver pair of geographic sites with a fixed range over which oblique sounding is performed."""@en .

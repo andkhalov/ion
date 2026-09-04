@@ -1,0 +1,164 @@
+@prefix iono: <http://scilibai.ru/onto/iono#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+
+<http://scilibai.ru/onto/iono/shapes> a owl:Ontology ;
+    rdfs:label "SHACL-формы S1-S5 (НЗ; S2/S4/S5 верны и для ВЗ)"@ru ;
+    owl:versionInfo "0.3.0-prototype" .
+
+
+# =====================================================================
+#  iono-shapes.ttl — физические ограничения интерпретации как SHACL-формы
+#
+#  Формы соответствуют компетентностным вопросам уровня 3 из
+#  mine/inonograms/report/ontology_CQ_et0.md, §2 и §5 (FCQ-2, FCQ-3),
+#  и списку ограничений из report/03_постановка_задачи.md, §3.2.3.
+#
+#  Проверка выполняется ПОСЛЕ материализации OWL 2 RL-замыкания:
+#  формы опираются на выводимое свойство iono:reflectsFromLayer
+#  (цепочка hasTrajectorySegment ∘ reflectsFrom) и на выведенные типы мод.
+#
+#  Все формы — sh:sparql поверх sh:targetClass iono:Ionogram, поскольку
+#  ограничения связывают ДВА разных индивида, что не выражается ни в
+#  OWL 2 RL, ни в ядерных SHACL-компонентах.
+# =====================================================================
+
+iono:IonogramInterpretationShape a sh:NodeShape ;
+    sh:targetClass iono:Ionogram ;
+    rdfs:label "Проверка физической допустимости интерпретации ионограммы"@ru ;
+
+    # -----------------------------------------------------------------
+    # S1. Упорядоченность МНЧ по кратности (CQ-3.1, FCQ-2).
+    # При одном и том же отражающем слое МНЧ моды меньшей кратности строго выше:
+    # с ростом числа скачков угол падения приближается к вертикали и секанс убывает.
+    # Эмпирическая опора: корреляция МНЧ мод соседних порядков 0,92–0,99
+    # [Щирый, 2007, с. 109]. Допуск 0,1 МГц отвечает разрешению по частоте
+    # цитируемого ЛЧМ-ионозонда (100 кГц): совпадение значений, возникающее при
+    # усечении обеих МНЧ верхней границей диапазона зондирования, нарушением не считается.
+    # Форма верна при горизонтально однородной ионосфере вдоль трассы.
+    # Нормативное исключение (Ф-19): на неоднородной трассе МПЧ многоскачковой
+    # моды определяется «худшим» скачком ([РД2023] §6.5.6.2) — порядок может нарушаться;
+    # это явное допущение в смысле Grüninger & Fox.
+    # -----------------------------------------------------------------
+    sh:sparql [
+        a sh:SPARQLConstraint ;
+        sh:message "S1: нарушена упорядоченность МНЧ по кратности — МНЧ моды {?m1} (кратность меньше) не превышает МНЧ моды {?m2}"@ru ;
+        sh:severity sh:Violation ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this ?m1 ?m2 WHERE {
+              ?t1 iono:isTraceIn $this ; iono:denotes ?m1 .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?m2 .
+              ?m1 iono:hasHopCount ?n1 ; iono:hasMOFValue ?f1 ; iono:reflectsFromLayer ?L .
+              ?m2 iono:hasHopCount ?n2 ; iono:hasMOFValue ?f2 ; iono:reflectsFromLayer ?L .
+              FILTER (?n1 < ?n2 && ?f1 < ?f2 - 0.1)
+            }
+        """ ] ;
+
+    # -----------------------------------------------------------------
+    # S2. Монотонность групповой задержки по кратности (CQ-3.2).
+    # Минимальная задержка n-скачковой моды не меньше задержки моды меньшей
+    # кратности от того же слоя. Мультипликативный допуск 5 % (?d2 < ?d1·0.95)
+    # учитывает изменение высоты отражения при смене угла падения; в РД такого
+    # допуска нет — рабочее значение проекта (С-18).
+    # -----------------------------------------------------------------
+    sh:sparql [
+        a sh:SPARQLConstraint ;
+        sh:message "S2: нарушена монотонность задержки по кратности — задержка моды {?m2} меньше задержки моды {?m1} меньшей кратности"@ru ;
+        sh:severity sh:Violation ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this ?m1 ?m2 WHERE {
+              ?t1 iono:isTraceIn $this ; iono:denotes ?m1 .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?m2 .
+              ?m1 iono:hasHopCount ?n1 ; iono:hasMinDelayValue ?d1 ; iono:reflectsFromLayer ?L .
+              ?m2 iono:hasHopCount ?n2 ; iono:hasMinDelayValue ?d2 ; iono:reflectsFromLayer ?L .
+              FILTER (?n1 < ?n2 && ?d2 < ?d1 * 0.95)
+            }
+        """ ] ;
+
+    # -----------------------------------------------------------------
+    # S3. Парность лучей (CQ-3.4, FCQ-3).
+    # Верхний (педерсеновский) луч существует только совместно с нижним лучом
+    # той же кратности от того же слоя. Исключение — модели ММЛ XI–XIV, где
+    # нижний луч отсутствует или очень короток; оно вводится явным допущением
+    # iono:shortLowerRayAssumption в смысле Grüninger & Fox, §6.
+    # -----------------------------------------------------------------
+    sh:sparql [
+        a sh:SPARQLConstraint ;
+        sh:message "S3: нарушена парность лучей — верхнелучевая мода {?m} размечена без нижнего луча той же кратности"@ru ;
+        sh:severity sh:Violation ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this ?m WHERE {
+              ?t iono:isTraceIn $this ; iono:denotes ?m .
+              ?m iono:hasRayType iono:upperRay ; iono:hasHopCount ?n ; iono:reflectsFromLayer ?L .
+              FILTER NOT EXISTS { ?m iono:shortLowerRayAssumption true }
+              FILTER NOT EXISTS {
+                ?t2 iono:isTraceIn $this ; iono:denotes ?m2 .
+                ?m2 iono:hasRayType iono:lowerRay ; iono:hasHopCount ?n ; iono:reflectsFromLayer ?L .
+              }
+            }
+        """ ] ;
+
+    # -----------------------------------------------------------------
+    # S4. Упорядоченность задержки по высоте отражения (CQ-3.2, CQ-3.3).
+    # При одной и той же кратности групповая задержка растёт с высотой отражающего
+    # слоя: P = sqrt(D^2 + (2 n h)^2). Пример регламента подтверждает соотношение
+    # напрямую: задержка моды 1E/Es 3,34 мс, моды 1F2 -- 3,67 мс на той же ионограмме
+    # [[РД2023], §7.3.3]. Слои E и Es отнесены к одному уровню высот.
+    # Упорядоченность НАБЛЮДАЕМЫХ ЧАСТОТ по слоям при наклонном падении не выполняется
+    # (множитель секанса тем больше, чем ниже слой), и такой формы в наборе нет.
+    # 0.2: добавлен допуск 0,02 мс (T-12 — единственная форма была без допуска;
+    # равные задержки, напр. 3,34/3,34, нарушением не считаются).
+    # -----------------------------------------------------------------
+    sh:sparql [
+        a sh:SPARQLConstraint ;
+        sh:message "S4: нарушена упорядоченность задержки по высоте отражения -- мода {?m1} от нижележащего слоя имеет задержку не меньше, чем мода {?m2} от вышележащего"@ru ;
+        sh:severity sh:Violation ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this ?m1 ?m2 WHERE {
+              ?t1 iono:isTraceIn $this ; iono:denotes ?m1 .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?m2 .
+              ?m1 iono:hasHopCount ?n ; iono:hasMinDelayValue ?d1 ; iono:reflectsFromLayer ?L1 .
+              ?m2 iono:hasHopCount ?n ; iono:hasMinDelayValue ?d2 ; iono:reflectsFromLayer ?L2 .
+              ?L1 iono:layerHeightOrder ?o1 . ?L2 iono:layerHeightOrder ?o2 .
+              FILTER (?o1 < ?o2 && ?d1 >= ?d2 - 0.02)
+            }
+        """ ] ;
+
+    # -----------------------------------------------------------------
+    # S5. Однозначность разметки сцены (CQ-2.1, CQ-3.8).
+    # Два различных трека одной ионограммы не могут обозначать один и тот же
+    # способ распространения: моды на ионограмме образуют интервалы постоянной
+    # многолучёвости, в которых каждая мода представлена одним следом
+    # [Щирый, 2007, §3.3]. Совпадение проверяется по кортежу ортогональных
+    # признаков (кратность, тип луча, отражающий слой), а не по строке-обозначению.
+    # Исключение — разрешённая магнитоионная пара (модели ММЛ VII и VIII), где два
+    # следа различаются только компонентой O или X: такие моды различны.
+    # -----------------------------------------------------------------
+    sh:sparql [
+        a sh:SPARQLConstraint ;
+        sh:message "S5: треки {?t1} и {?t2} обозначают один и тот же способ распространения"@ru ;
+        sh:severity sh:Violation ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this ?t1 ?t2 WHERE {
+              ?t1 iono:isTraceIn $this ; iono:denotes ?m1 .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?m2 .
+              ?m1 iono:hasHopCount ?n ; iono:hasRayType ?r ; iono:reflectsFromLayer ?L .
+              ?m2 iono:hasHopCount ?n ; iono:hasRayType ?r ; iono:reflectsFromLayer ?L .
+              FILTER (STR(?t1) < STR(?t2))
+              FILTER NOT EXISTS {
+                ?m1 iono:hasMagnetoionicComponent ?c1 .
+                ?m2 iono:hasMagnetoionicComponent ?c2 .
+                FILTER (?c1 != ?c2)
+              }
+            }
+        """ ] .
+
+iono: sh:declare [ sh:prefix "iono" ; sh:namespace "http://scilibai.ru/onto/iono#"^^xsd:anyURI ] .

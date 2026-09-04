@@ -1,0 +1,73 @@
+@prefix iono: <http://scilibai.ru/onto/iono#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# Сцена B: та же геометрия и те же измеренные значения,
+# метки 1F2 и 2F2 переставлены. Изображение неотличимо от сцены A.
+
+iono:Path_P1 a owl:NamedIndividual , iono:RadioPath ;
+    rdfs:label "Условная односкачковая среднеширотная трасса"@ru ;
+    iono:hasPathType iono:subauroral .
+
+iono:ion_B a owl:NamedIndividual , iono:Ionogram .
+iono:ion_B_tr1 a owl:NamedIndividual , iono:IonogramTrace ;
+    iono:isTraceIn iono:ion_B ;
+    iono:denotes iono:ion_B_m_tr1 .
+iono:ion_B_m_tr1 a owl:NamedIndividual , iono:PropagationMode ;
+    iono:hasModeLabel "2F2" ;
+    iono:hasHopCount 2 ;
+    iono:hasRayType iono:lowerRay ;
+    iono:hasPathClass iono:greatCircle ;
+    iono:hasMagnetoionicComponent iono:unresolved ;
+    iono:hasTrajectorySegment iono:ion_B_s_tr1 ;
+    iono:occursOn iono:Path_P1 ;
+    iono:hasMOFValue 10.1 ;
+    iono:hasMinDelayValue 3.67 .
+iono:ion_B_s_tr1 a owl:NamedIndividual , iono:TrajectorySegment ;
+    iono:reflectsFrom iono:Layer_F2 .
+iono:ion_B_tr2 a owl:NamedIndividual , iono:IonogramTrace ;
+    iono:isTraceIn iono:ion_B ;
+    iono:denotes iono:ion_B_m_tr2 .
+iono:ion_B_m_tr2 a owl:NamedIndividual , iono:PropagationMode ;
+    iono:hasModeLabel "1F2p" ;
+    iono:hasHopCount 1 ;
+    iono:hasRayType iono:upperRay ;
+    iono:hasPathClass iono:greatCircle ;
+    iono:hasMagnetoionicComponent iono:unresolved ;
+    iono:hasTrajectorySegment iono:ion_B_s_tr2 ;
+    iono:occursOn iono:Path_P1 ;
+    iono:hasMOFValue 10.1 ;
+    iono:hasMinDelayValue 4.10 .
+iono:ion_B_s_tr2 a owl:NamedIndividual , iono:TrajectorySegment ;
+    iono:reflectsFrom iono:Layer_F2 .
+iono:ion_B_tr3 a owl:NamedIndividual , iono:IonogramTrace ;
+    iono:isTraceIn iono:ion_B ;
+    iono:denotes iono:ion_B_m_tr3 .
+iono:ion_B_m_tr3 a owl:NamedIndividual , iono:PropagationMode ;
+    iono:hasModeLabel "1F2" ;
+    iono:hasHopCount 1 ;
+    iono:hasRayType iono:lowerRay ;
+    iono:hasPathClass iono:greatCircle ;
+    iono:hasMagnetoionicComponent iono:unresolved ;
+    iono:hasTrajectorySegment iono:ion_B_s_tr3 ;
+    iono:occursOn iono:Path_P1 ;
+    iono:hasMOFValue 7.2 ;
+    iono:hasMinDelayValue 4.69 .
+iono:ion_B_s_tr3 a owl:NamedIndividual , iono:TrajectorySegment ;
+    iono:reflectsFrom iono:Layer_F2 .
+iono:ion_B_tr4 a owl:NamedIndividual , iono:IonogramTrace ;
+    iono:isTraceIn iono:ion_B ;
+    iono:denotes iono:ion_B_m_tr4 .
+iono:ion_B_m_tr4 a owl:NamedIndividual , iono:PropagationMode ;
+    iono:hasModeLabel "1Es" ;
+    iono:hasHopCount 1 ;
+    iono:hasRayType iono:lowerRay ;
+    iono:hasPathClass iono:greatCircle ;
+    iono:hasMagnetoionicComponent iono:unresolved ;
+    iono:hasTrajectorySegment iono:ion_B_s_tr4 ;
+    iono:occursOn iono:Path_P1 ;
+    iono:hasMOFValue 17.7 ;
+    iono:hasMinDelayValue 3.34 .
+iono:ion_B_s_tr4 a owl:NamedIndividual , iono:TrajectorySegment ;
+    iono:reflectsFrom iono:Layer_Es .

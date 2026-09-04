@@ -1,0 +1,157 @@
+site_name: Pynasonde Documentation
+repo_url: https://github.com/shibaji7/pynasonde
+theme: 
+  name: "material"
+  logo: assets/Colab-pynasonde-logo2.jpg
+  features:
+    - content.code.copy
+    - content.code.select
+    - content.code.annotate
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.path
+
+plugins:
+    - search
+    - glightbox
+    - awesome-pages
+    - mkdocstrings:
+        enabled: !ENV [ENABLE_MKDOCSTRINGS, true]
+        default_handler: python
+        handlers:
+          python:
+            paths: [".."]
+            options:
+              show_root_heading: true
+              show_source: true
+              members_order: source
+              show_symbol_type_heading: true
+              show_symbol_type_toc: true
+              docstring_style: google
+              docstring_options:
+                warnings: false
+     
+markdown_extensions:
+    - extra
+    - admonition
+    - toc
+    - tables
+    - attr_list
+    - toc:
+        permalink: true
+    - pymdownx.arithmatex:
+        generic: true
+    - pymdownx.betterem
+    - pymdownx.caret
+    - pymdownx.mark
+    - pymdownx.tilde
+    - attr_list
+    - md_in_html
+    - pymdownx.highlight:
+        anchor_linenums: true
+        line_spans: __span
+        pygments_lang_class: true
+    - pymdownx.inlinehilite
+    - pymdownx.snippets
+    - pymdownx.superfences
+    - pymdownx.details
+    - footnotes
+        
+extra_css:
+    - css/pynasonde.css
+
+extra_javascript:
+    - javascripts/mathjax.js
+    - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+    - Home: index.md
+    - Installation: user/install.md  
+    # - Ionosonde Data Access: user/ionosonde.md
+    - VIPIR: user/vipir.md
+    - DIGISONDE: user/digisonde.md
+    - Citing: user/citing.md
+    - Authors: user/authors.md
+    - Toolbox:
+            - ISCA: tools/isca.md
+            - FTI: tools/fti.md
+            - HF Ray Tracing: tools/raytrace.md
+    - Examples:
+            - Overview: examples/index.md
+            - VIPIR Examples:
+                    - Read/Plot RIQ: examples/vipir/proc_riq.md
+                    - Echo Extraction (7-param, PL407): examples/vipir/echo_extraction.md
+                    - Echo Extraction (7-param, WI937): examples/vipir/echo_extraction_wi937.md
+                    - Read/Plot FTI: examples/vipir/fti.md
+                    - Es Layer Imaging (Capon A+B+C): examples/vipir/es_imaging.md
+            - Digisonde Examples:
+                    - SAO Height Profiles + F2: examples/digisonde/sao.md
+                    - SAO Isodensity + DFT Waterfall: examples/digisonde/sao_dft.md
+                    - Read/Plot SKY: examples/digisonde/sky.md
+                    - Read/Plot DVL: examples/digisonde/dvl.md
+                    - RSF Parse and Inspect: examples/digisonde/rsf.md
+                    - RSF Viterbi Autoscaling: examples/digisonde/rsf_scaler.md
+                    - RSF Direction Ionogram + Directogram: examples/digisonde/rsf_direction_ionogram.md
+                    - MMM ModMax Ionogram: examples/digisonde/mmm.md
+                    - SAO Multi-Record Day-Files: examples/digisonde/sao_multi.md
+    - API Documentation:
+                - Overview: dev/api_index.md
+                - Digisonde:
+                        - Utils: dev/digisonde/digi_utils.md
+                        - Plot Utils: dev/digisonde/digi_plots.md
+                        - DIDBase Connector: dev/digisonde/didbase.md
+                        - Digisonde Parsers:
+                                - SAO: dev/digisonde/parsers/sao.md
+                                - SKY: dev/digisonde/parsers/sky.md
+                                - Image: dev/digisonde/parsers/image.md
+                                - DFT: dev/digisonde/parsers/dft.md
+                                - RSF: dev/digisonde/parsers/rsf.md
+                                - SBF: dev/digisonde/parsers/sbf.md
+                                - MMM: dev/digisonde/parsers/mmm.md
+                                - GRM: dev/digisonde/parsers/grm.md
+                                - EDP: dev/digisonde/parsers/edp.md
+                                - DVL: dev/digisonde/parsers/dvl.md
+                        - Digisonde Datatypes:
+                                - SAO XML: dev/digisonde/datatypes/saoxmldatatypes.md
+                                - SBF:  dev/digisonde/datatypes/sbfdatatypes.md
+                                - MMM: dev/digisonde/datatypes/mmmdatatypes.md
+                                - DFT: dev/digisonde/datatypes/dftdatatypes.md
+                                - RSF: dev/digisonde/datatypes/rsfdatatypes.md
+                        - Raw IQ Processing:
+                                - Overview: dev/digisonde/raw/index.md
+                                - Pipeline (raw_parse): dev/digisonde/raw/raw_parse.md
+                                - IQ Reader: dev/digisonde/raw/iq_reader.md
+                                - Plots: dev/digisonde/raw/raw_plots.md
+                - VIPIR:
+                        - Overview: dev/vipir/index.md
+                        - RIQ Overview: dev/vipir/riq/index.md
+                        - VIPIR Ionogram:
+                                - Overview: dev/vipir/ngi/index.md
+                                - Utils: dev/vipir/ngi/utils.md
+                                - Source: dev/vipir/ngi/source.md
+                                - Scale: dev/vipir/ngi/scale.md
+                                - Plot Utils: dev/vipir/ngi/plotlib.md
+                        - Echo Extractor: dev/vipir/riq/echo.md
+                        - VIPIR RIQ Parsers:
+                                - Overview: dev/vipir/riq/parsers/index.md
+                                - Filter: dev/vipir/riq/parsers/filter.md
+                                - Read RIQ: dev/vipir/riq/parsers/read_riq.md
+                                - Utils: dev/vipir/riq/utils.md
+                        - VIPIR RIQ Datatypes:
+                                - Overview: dev/vipir/riq/datatypes/index.md
+                                - SCT: dev/vipir/riq/datatypes/sct.md
+                                - PCT: dev/vipir/riq/datatypes/pct.md
+                        - VIPIR Analysis:
+                                - Overview: dev/vipir/analysis/index.md
+                                - Es Imaging:
+                                        - Package Overview: dev/vipir/analysis/es_imaging/index.md
+                                        - capon.py (EsCaponImager): dev/vipir/analysis/es_imaging/capon.md
+                                        - aggregator.py (RiqAggregator): dev/vipir/analysis/es_imaging/aggregator.md
+                                - Absorption: dev/vipir/analysis/absorption.md
+                                - True Height Inversion: dev/vipir/analysis/inversion.md
+                                - Polarization (O/X): dev/vipir/analysis/polarization.md
+                                - Spread-F: dev/vipir/analysis/spread_f.md
+                                - Ionogram Scaler: dev/vipir/analysis/scaler.md
+                                - Irregularities (EP): dev/vipir/analysis/irregularities.md
+                                - NeXtYZ 3-D Inversion: dev/vipir/analysis/nextyz.md

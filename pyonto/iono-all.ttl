@@ -1,0 +1,21 @@
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# =====================================================================
+#  iono-all.ttl — агрегатор словаря (М-12): один owl:imports вместо
+#  списка путей в скрипте. SHACL-файлы (iono-shapes*.ttl) сюда намеренно
+#  НЕ входят — формы подаются в pyshacl отдельным графом (см. validate.py
+#  и README). rdflib не разрешает imports автоматически — используйте
+#  validate.load_vocabulary() либо загрузите шесть файлов явно.
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/all> a owl:Ontology ;
+    rdfs:label "Онтология интерпретации ионограмм — полный словарь"@ru ;
+    owl:imports <http://scilibai.ru/onto/iono> ,
+                <http://scilibai.ru/onto/iono/char> ,
+                <http://scilibai.ru/onto/iono/quality> ,
+                <http://scilibai.ru/onto/iono/es> ,
+                <http://scilibai.ru/onto/iono/phenomena> ,
+                <http://scilibai.ru/onto/iono/observation> ;
+        rdfs:comment """Ключи источников в аннотациях: [РД2023] = РД 52.26.817–2023 «Проведение наблюдений за ионосферой...» (Росгидромет; печатная страница = страница PDF − 10); [UAG23A] = Piggott W.R., Rawer K. URSI Handbook of Ionogram Interpretation and Reduction, Rep. UAG-23A, NOAA, 1978; [Щирый2007] = Щирый А.О., дисс. канд. техн. наук, СПб., 2007; [ЛС2026] = Литвинов В.Л., Скрипачев В.О., монография по ионосферному зондированию, 2026; [Davies1990] = Davies K. Ionospheric Radio. IET, 1990; [SAO43] = SAO 4.3 (ulcar.uml.edu/~iag/SAO-4.3.htm); [ArpSmithSpear2015] = Arp R., Smith B., Spear A.D. Building Ontologies with BFO. MIT Press, 2015. Идентификаторы вида М-xx/Ф-xx/Ч-xx/T-xx/С-xx — находки пяти независимых ревью онтологии (методология/физика/читатель/техника/сверка источников, 2026-09-03; протокол решений — research/05-shiryi-merge.md)."""@ru ;
+    owl:versionInfo "0.3.0-prototype" .

@@ -1,0 +1,24 @@
+# Отдельный git-репозиторий эксперимента (origin: https://github.com/andkhalov/ion).
+# Служебные файлы агента и рабочего процесса — вне git (решение АХ 2026-09-04)
+CLAUDE.md
+DIARY.md
+STATUS.md
+.claude/
+local/
+# окружение строится ТОЛЬКО внутри проекта (.venv) и не версионируется
+.venv/
+# данные не версионируем: корпус качается download_corpus.sh, кэши/манифест генерятся;
+# исключение — ручная разметка (data/manual/), она часть результата
+data/*
+!data/manual/
+# артефакты прогонов (веса/логи TensorBoard живут на сервере, сводки — в DIARY/figures)
+runs/
+# литература переносится отдельно (rsync), не через git (объём/копирайт)
+lit/
+# служебное
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+*.log

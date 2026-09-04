@@ -1,0 +1,250 @@
+@prefix iono:    <http://scilibai.ru/onto/iono#> .
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# =====================================================================
+#  iono-shapes-quality.ttl — SHACL-ФОРМЫ УРОВНЯ ХАРАКТЕРИСТИК (0.2.0)
+#
+#  Q1–Q3 — физическая согласованность чисел (Violation);
+#  Q4–Q7 — буквенная дисциплина РД (Warning);
+#  Q8–Q10 — полнота описания характеристики (Q8 Violation, Q9–Q10 Warning).
+#
+#  0.2.0 (по ревью 2026-09-03):
+#  - sh:severity перенесён на УРОВЕНЬ ФОРМ (Ч-02: внутри SPARQLConstraint
+#    pyshacl его игнорирует и всё было Violation);
+#  - таргет Q1–Q7 — iono:VerticalIonogram (Ф-11/Ч-01: критические частоты
+#    и буквенные правила §6.5 — предмет ВЗ);
+#  - слои опознаются классами (?L a iono:LayerF2), а не магическим
+#    layerHeightOrder (М-15/Ф-35/Ч-09); порядок частот — verticalPeakOrder;
+#  - все сравнения с > и <= обёрнуты BIND(xsd:decimal(STR(…))) — защита
+#    от numpy.float64 и ill-typed литералов (T-01/T-02);
+#  - Es исключён из Q1 по определению (foEs — LimitFrequencyDatum, Ф-01);
+#  - Q5 учитывает относительную ветку ±2 %/±5 % (Ф-14);
+#  - Q6/Q7 покрывают вторые половины условия G (Ф-15/С-11);
+#  - Q1 пропускает данные с DL_G и foE с DL_K (Ф-16);
+#  - Q3 ограничена fxI (refersToLayer Layer_F) и пропускает foF2
+#    с QL_I/T/D/J (Ф-17).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/shapes-quality> a owl:Ontology ;
+    rdfs:label "SHACL-формы уровня характеристик (Q1–Q10)"@ru ;
+    owl:versionInfo "0.2.0-prototype" .
+
+iono:CharacteristicConsistencyShape a sh:NodeShape ;
+    sh:targetClass iono:VerticalIonogram ;
+    sh:severity sh:Violation ;
+    rdfs:label "Q1–Q3: физическая согласованность характеристик (ВЗ)"@ru ;
+    dcterms:source "[РД2023], §6.5.1, §6.5.4.3" ;
+
+    # Q1. Порядок критических частот при ВЗ: foE ≤ foF1 ≤ foF2 (≤ foF3).
+    # Допуск 0,1 МГц — квант шкалы отсчёта; пары с буквой G и foE с K пропускаются.
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q1: нарушен порядок критических частот при ВЗ — {?c1} > {?c2}"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?c1 ?c2 WHERE {
+              ?c1 iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                  iono:refersToLayer ?L1 ; iono:hasNumericValue ?r1 .
+              ?c2 iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                  iono:refersToLayer ?L2 ; iono:hasNumericValue ?r2 .
+              ?L1 iono:verticalPeakOrder ?o1 . ?L2 iono:verticalPeakOrder ?o2 .
+              BIND (xsd:decimal(STR(?r1)) AS ?v1) BIND (xsd:decimal(STR(?r2)) AS ?v2)
+              FILTER (?o1 < ?o2 && ?v1 > ?v2 + 0.1)
+              FILTER NOT EXISTS { ?c1 iono:hasDescriptiveLetter iono:DL_G }
+              FILTER NOT EXISTS { ?c2 iono:hasDescriptiveLetter iono:DL_G }
+              FILTER NOT EXISTS { ?c1 iono:hasDescriptiveLetter iono:DL_K }
+            }
+        """ ] ;
+
+    # Q2. fbEs ≤ foEs (частота экранирования не выше предельной частоты Es).
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q2: fbEs больше foEs — {?b} > {?f}"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?b ?f WHERE {
+              ?b iono:isCharacteristicOf $this ; a iono:BlanketingFrequencyDatum ; iono:hasNumericValue ?rb .
+              ?f iono:isCharacteristicOf $this ; a iono:LimitFrequencyDatum ;
+                 iono:refersToLayer ?L ; iono:hasNumericValue ?rf .
+              ?L a iono:SporadicELayer .
+              BIND (xsd:decimal(STR(?rb)) AS ?vb) BIND (xsd:decimal(STR(?rf)) AS ?vf)
+              FILTER (?vb > ?vf)
+            }
+        """ ] ;
+
+    # Q3. fxI ≥ foF2 (верхняя огибающая области F не ниже критической O).
+    # Пропуск, если foF2 восстановлена/предельна (QL_I, QL_T, QL_D, QL_J) — Ф-17.
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q3: fxI меньше foF2 — перепутаны компоненты или огибающая"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?x ?o WHERE {
+              ?x iono:isCharacteristicOf $this ; a iono:TopFrequencyDatum ;
+                 iono:refersToLayer ?LF ; iono:hasNumericValue ?rx .
+              ?LF a iono:FRegion .
+              ?o iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                 iono:refersToLayer ?L2 ; iono:hasNumericValue ?ro .
+              ?L2 a iono:LayerF2 .
+              FILTER NOT EXISTS { ?o iono:refersToComponent iono:extraordinary }
+              BIND (xsd:decimal(STR(?rx)) AS ?vx) BIND (xsd:decimal(STR(?ro)) AS ?vo)
+              FILTER (?vx < ?vo)
+              FILTER NOT EXISTS { ?o iono:hasQualifyingLetter iono:QL_I }
+              FILTER NOT EXISTS { ?o iono:hasQualifyingLetter iono:QL_T }
+              FILTER NOT EXISTS { ?o iono:hasQualifyingLetter iono:QL_D }
+              FILTER NOT EXISTS { ?o iono:hasQualifyingLetter iono:QL_J }
+            }
+        """ ] .
+
+iono:LetterConsistencyShape a sh:NodeShape ;
+    sh:targetClass iono:VerticalIonogram ;
+    sh:severity sh:Warning ;
+    rdfs:label "Q4–Q7: буквенная дисциплина РД (дефекты оформления, не физики)"@ru ;
+    dcterms:source "[РД2023], §6.5.5.2, §6.5.5.4, §6.5.4.3" ;
+
+    # Q4. foE: неточность в (0,05; 0,15] МГц требует оценочной буквы U (§6.5.5.2).
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q4: foE с неточностью 0,05–0,15 МГц не помечено буквой U"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?c WHERE {
+              ?c iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                 iono:refersToLayer ?L ; iono:hasErrorEstimate ?re .
+              ?L a iono:LayerE .
+              BIND (xsd:decimal(STR(?re)) AS ?e)
+              FILTER (?e > 0.05 && ?e <= 0.15)
+              FILTER NOT EXISTS { ?c iono:hasQualifyingLetter iono:QL_U }
+            }
+        """ ] ;
+
+    # Q5. foF2: «оценочная» зона — больше max(0,1 МГц; 2 %), но не выше
+    # max(0,2 МГц; 5 %) — требует буквы U (§6.5.5.4; относительная ветка — Ф-14).
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q5: foF2 с неточностью в оценочной зоне (±0,1–0,2 МГц или 2–5 %) не помечено буквой U"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?c WHERE {
+              ?c iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                 iono:refersToLayer ?L ; iono:hasNumericValue ?rv ; iono:hasErrorEstimate ?re .
+              ?L a iono:LayerF2 .
+              BIND (xsd:decimal(STR(?rv)) AS ?v) BIND (xsd:decimal(STR(?re)) AS ?e)
+              FILTER (?e > 0.1 && ?e > 0.02 * ?v)
+              FILTER (?e <= 0.2 || ?e <= 0.05 * ?v)
+              FILTER NOT EXISTS { ?c iono:hasQualifyingLetter iono:QL_U }
+            }
+        """ ] ;
+
+    # Q6. Условие G для F2 (§6.5.4.3-а): foF2 − foF1 < 0,5 МГц ⇒ G у foF2…
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q6: foF2 − foF1 < 0,5 МГц, но буква G у foF2 не проставлена (условие G)"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?c2 WHERE {
+              ?c2 iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                  iono:refersToLayer ?L2 ; iono:hasNumericValue ?r2 .
+              ?c1 iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                  iono:refersToLayer ?L1 ; iono:hasNumericValue ?r1 .
+              ?L2 a iono:LayerF2 . ?L1 a iono:LayerF1 .
+              BIND (xsd:decimal(STR(?r2)) AS ?v2) BIND (xsd:decimal(STR(?r1)) AS ?v1)
+              FILTER (?v2 >= ?v1 && ?v2 - ?v1 < 0.5)
+              FILTER NOT EXISTS { ?c2 iono:hasDescriptiveLetter iono:DL_G }
+            }
+        """ ] ;
+
+    # Q6b. …и M3000F2/hpF2 при условии G заменяются буквой G (Ф-15, вторая половина §6.5.4.3-а).
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q6b: при условии G значение {?m} (M3000F2/hpF2) должно быть заменено буквой G"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?m WHERE {
+              ?c2 iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                  iono:refersToLayer ?L2 ; iono:hasNumericValue ?r2 .
+              ?c1 iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                  iono:refersToLayer ?L1 ; iono:hasNumericValue ?r1 .
+              ?L2 a iono:LayerF2 . ?L1 a iono:LayerF1 .
+              BIND (xsd:decimal(STR(?r2)) AS ?v2) BIND (xsd:decimal(STR(?r1)) AS ?v1)
+              FILTER (?v2 >= ?v1 && ?v2 - ?v1 < 0.5)
+              { ?m iono:isCharacteristicOf $this ; a iono:MFactorDatum ; iono:hasNumericValue ?any }
+              UNION
+              { ?m iono:isCharacteristicOf $this ; a iono:PeakVirtualHeightDatum ; iono:hasNumericValue ?any }
+              FILTER NOT EXISTS { ?m iono:hasDescriptiveLetter iono:DL_G }
+            }
+        """ ] ;
+
+    # Q7. Условие G для Es (§6.5.4.3-б): (foEs ≤ foE ИЛИ fbEs ≤ foE) ⇒ буква G
+    # у ОБЕИХ величин foEs и fbEs (Ф-15/С-11).
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q7: условие G для Es выполнено (foEs или fbEs ≤ foE), но буква G у {?t} не проставлена"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?t WHERE {
+              ?ce iono:isCharacteristicOf $this ; a iono:CriticalFrequencyDatum ;
+                  iono:refersToLayer ?Le ; iono:hasNumericValue ?rEv .
+              ?Le a iono:LayerE .
+              BIND (xsd:decimal(STR(?rEv)) AS ?ve)
+              {
+                ?trg iono:isCharacteristicOf $this ; a iono:LimitFrequencyDatum ;
+                     iono:refersToLayer ?Ls ; iono:hasNumericValue ?rt .
+                ?Ls a iono:SporadicELayer .
+              } UNION {
+                ?trg iono:isCharacteristicOf $this ; a iono:BlanketingFrequencyDatum ;
+                     iono:hasNumericValue ?rt .
+              }
+              BIND (xsd:decimal(STR(?rt)) AS ?vt)
+              FILTER (?vt <= ?ve)
+              {
+                ?t iono:isCharacteristicOf $this ; a iono:LimitFrequencyDatum ;
+                   iono:refersToLayer ?Lt . ?Lt a iono:SporadicELayer .
+              } UNION {
+                ?t iono:isCharacteristicOf $this ; a iono:BlanketingFrequencyDatum .
+              }
+              FILTER NOT EXISTS { ?t iono:hasDescriptiveLetter iono:DL_G }
+            }
+        """ ] .
+
+# --- Q8–Q10: полнота описания характеристики (T-06); таргет — сами данные ---
+
+iono:CharCompletenessShape a sh:NodeShape ;
+    sh:targetClass iono:CharacteristicDatum ;
+    sh:severity sh:Violation ;
+    rdfs:label "Q8: значение либо есть, либо объяснено"@ru ;
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q8: у характеристики {$this} нет числового значения и не указаны ни причина отсутствия, ни заменяющая описательная буква"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this WHERE {
+              FILTER NOT EXISTS { $this iono:hasNumericValue      ?v }
+              FILTER NOT EXISTS { $this iono:hasNoValueCause      ?c }
+              FILTER NOT EXISTS { $this iono:hasDescriptiveLetter ?d }
+            }
+        """ ] .
+
+iono:CharAnnotationShape a sh:NodeShape ;
+    sh:targetClass iono:CharacteristicDatum ;
+    sh:severity sh:Warning ;
+    rdfs:label "Q9–Q10: согласованность классов точности, букв и причин"@ru ;
+    # Q9. accuracyClass = estimated ⇒ буква U (§6.5.5).
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q9: {$this} отнесена к классу «оценочное», но не помечена буквой U"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT $this WHERE {
+              $this iono:hasAccuracyClass iono:estimated .
+              FILTER NOT EXISTS { $this iono:hasQualifyingLetter iono:QL_U }
+            }
+        """ ] ;
+    # Q10. Буква ↔ цифра причины согласуются по correspondsToCause
+    # (FILTER EXISTS обязателен: буквы без сопоставления не проверяются).
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "Q10: описательная буква {?d} у {$this} не соответствует причине отсутствия {?c}"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?d ?c WHERE {
+              $this iono:hasNoValueCause ?c ; iono:hasDescriptiveLetter ?d .
+              FILTER EXISTS     { ?d iono:correspondsToCause ?any }
+              FILTER NOT EXISTS { ?d iono:correspondsToCause ?c }
+            }
+        """ ] .
+
+iono: sh:declare [ sh:prefix "iono" ; sh:namespace "http://scilibai.ru/onto/iono#"^^xsd:anyURI ] .

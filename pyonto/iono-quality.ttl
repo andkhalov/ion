@@ -1,0 +1,251 @@
+@prefix iono:    <http://scilibai.ru/onto/iono#> .
+@prefix obo:  <http://purl.obolibrary.org/obo/> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+
+# =====================================================================
+#  iono-quality.ttl — МОДУЛЬ ОЦЕНКИ КАЧЕСТВА (0.2.0): буквы URSI,
+#  классы точности, причины отсутствия значения
+#
+#  [РД2023]: §6.5.4 (буквы, с. 61–65 печ. / 71–75 PDF),
+#  §6.5.5 (точность, с. 65–67 печ.), причины кода ИОНКА (с. 75 печ.),
+#  причины УСФРЕ НЗ (§7.3.4.2, §7.3.6). Буквы совпадают с Q/D-letters
+#  формата SAO — инвариант URSI Handbook [UAG23A], гл. III.
+#
+#  0.2.0 (по ревью): словари причин ИОНКА и УСФРЕ разведены (Ф-08 —
+#  цифры совпадают лишь частично); классы точности уточнены (Ф-09,
+#  С-16: третья ступень РД — «предельное, с буквой E/D», а не
+#  «сомнительное»); добавлено DL_N↔NVC_8 (Ф-10); AllDifferent (М-07);
+#  oneOf у AccuracyClass снят (М-08); метки букв различимы (Ч-14, С-21);
+#  формулировка DL_A по РД (С-17).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/quality> a owl:Ontology ;
+    rdfs:label "Модуль оценки качества интерпретации (буквы URSI)"@ru ;
+    owl:imports <http://scilibai.ru/onto/iono> , <http://scilibai.ru/onto/iono/char> ;
+    dcterms:source "[РД2023], §6.5.4–6.5.5, §6.6.1, §7.3.6; URSI Handbook [UAG23A], гл. III" ;
+        rdfs:comment """Ключи источников в аннотациях: [РД2023] = РД 52.26.817–2023 «Проведение наблюдений за ионосферой...» (Росгидромет; печатная страница = страница PDF − 10); [UAG23A] = Piggott W.R., Rawer K. URSI Handbook of Ionogram Interpretation and Reduction, Rep. UAG-23A, NOAA, 1978; [Щирый2007] = Щирый А.О., дисс. канд. техн. наук, СПб., 2007; [ЛС2026] = Литвинов В.Л., Скрипачев В.О., монография по ионосферному зондированию, 2026; [Davies1990] = Davies K. Ionospheric Radio. IET, 1990; [SAO43] = SAO 4.3 (ulcar.uml.edu/~iag/SAO-4.3.htm); [ArpSmithSpear2015] = Arp R., Smith B., Spear A.D. Building Ontologies with BFO. MIT Press, 2015. Идентификаторы вида М-xx/Ф-xx/Ч-xx/T-xx/С-xx — находки пяти независимых ревью онтологии (методология/физика/читатель/техника/сверка источников, 2026-09-03; протокол решений — research/05-shiryi-merge.md)."""@ru ;
+    owl:versionInfo "0.2.0-prototype" .
+
+# ---------------------------------------------------------------------
+#  1. Буквы URSI
+# ---------------------------------------------------------------------
+
+iono:UrsiLetter a owl:Class ;
+    rdfs:label "Буква URSI"@ru, "URSI letter"@en ;
+    rdfs:comment "Символ качества/описания при числовом значении характеристики (информационное обозначение). [РД2023] §6.5.4.1."@ru .
+
+iono:QualifyingLetter a owl:Class ; rdfs:subClassOf iono:UrsiLetter ;
+    rdfs:label "Оценочная буква"@ru, "qualifying letter"@en ;
+    rdfs:comment "Оценивает достоверность числа: A, D, E, I, J, M, O, T, U, Z (10 шт.). [РД2023] §6.5.4.2, с. 62 печ. Q-letter формата SAO."@ru .
+
+iono:DescriptiveLetter a owl:Class ; rdfs:subClassOf iono:UrsiLetter ;
+    rdfs:label "Описательная буква"@ru, "descriptive letter"@en ;
+    rdfs:comment "Называет причину/обстоятельство: A, B, C, D, E, F, G, H, K, L, M, N, O, P, Q, R, S, T, V, W, X, Y, Z (23 шт.). [РД2023] §6.5.4.3, с. 62–65 печ. D-letter формата SAO."@ru .
+
+[] a owl:AllDisjointClasses ; owl:members ( iono:QualifyingLetter iono:DescriptiveLetter ) .
+
+iono:hasQualifyingLetter a owl:ObjectProperty ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range iono:QualifyingLetter ;
+    rdfs:label "имеет оценочную букву"@ru, "has qualifying letter"@en ;
+    rdfs:comment "Не функционально намеренно: РД допускает сочетания (UL, EG …)."@ru .
+
+iono:hasDescriptiveLetter a owl:ObjectProperty ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range iono:DescriptiveLetter ;
+    rdfs:label "имеет описательную букву"@ru, "has descriptive letter"@en .
+
+iono:letterSymbol a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:UrsiLetter ; rdfs:range xsd:string ;
+    rdfs:label "символ"@ru, "letter symbol"@en .
+
+# --- оценочные (§6.5.4.2, с. 62 печ.) ---
+iono:QL_A a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "A" ;
+    rdfs:label "A (оцен.) — «меньше, чем» при полном экранировании"@ru, "URSI qualifying letter A"@en ;
+    rdfs:comment "Применяется только с fbEs в случае полного экранирования слоем Es вышележащих областей."@ru .
+iono:QL_D a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "D" ;
+    rdfs:label "D (оцен.) — больше, чем"@ru, "URSI qualifying letter D"@en .
+iono:QL_E a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "E" ;
+    rdfs:label "E (оцен.) — меньше, чем (общий случай)"@ru, "URSI qualifying letter E"@en ;
+    rdfs:comment "В отличие от A применяется с любым параметром; предельное значение сверху. (Метка уточнена: Ч-14 — различимость с QL_A.)"@ru .
+iono:QL_I a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "I" ;
+    rdfs:label "I (оцен.) — значение заменено интерполированным"@ru, "URSI qualifying letter I"@en .
+iono:QL_J a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "J" ;
+    rdfs:label "J (оцен.) — характеристика O-компоненты вычислена по X-компоненте"@ru, "URSI qualifying letter J"@en ;
+    rdfs:comment "Точное соотношение: fo = √(fx·(fx − fB)); приближение fo ≈ fx − fB/2 занижает fo на ≈ fB²/(8fo) и выходит за класс «точное» при малых fo (Ф-03). Основание формы V4."@ru .
+iono:QL_M a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "M" ;
+    rdfs:label "M (оцен.) — сомнительная интерпретация вида компоненты"@ru, "URSI qualifying letter M"@en .
+iono:QL_O a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "O" ;
+    rdfs:label "O (оцен.) — характеристика X-компоненты вычислена по O-компоненте"@ru, "URSI qualifying letter O"@en .
+iono:QL_T a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "T" ;
+    rdfs:label "T (оцен.) — значение определено по ряду последовательных наблюдений"@ru, "URSI qualifying letter T"@en ;
+    rdfs:comment "Нормативное основание использования временно́го контекста (соседних ионограмм) при интерпретации. Проверяемость требует времени наблюдения (hasObservationTime, модуль observation)."@ru .
+iono:QL_U a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "U" ;
+    rdfs:label "U (оцен.) — числовое значение недостоверно или сомнительно"@ru, "URSI qualifying letter U"@en .
+iono:QL_Z a owl:NamedIndividual , iono:QualifyingLetter ; iono:letterSymbol "Z" ;
+    rdfs:label "Z (оцен.) — характеристика O-компоненты вычислена по Z-компоненте"@ru, "URSI qualifying letter Z"@en .
+
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:QL_A iono:QL_D iono:QL_E iono:QL_I iono:QL_J
+   iono:QL_M iono:QL_O iono:QL_T iono:QL_U iono:QL_Z ) .
+
+# --- описательные (§6.5.4.3, с. 62–65 печ.) ---
+iono:DL_A a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "A" ;
+    rdfs:label "A (опис.) — влияние нижележащего тонкого Es"@ru, "URSI descriptive letter A"@en ;
+    rdfs:comment "Если Es делает измерение НЕВОЗМОЖНЫМ — значение заменяется буквой A; если ВЛИЯЕТ — буква A при числе с оценочной U/J/E/D (формулировка по РД, С-17)."@ru .
+iono:DL_B a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "B" ;
+    rdfs:label "B (опис.) — большое поглощение (большое fmin)"@ru, "URSI descriptive letter B"@en .
+iono:DL_C a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "C" ;
+    rdfs:label "C (опис.) — неионосферная причина (аппаратура, электроэнергия, часы)"@ru, "URSI descriptive letter C"@en .
+iono:DL_D a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "D" ;
+    rdfs:label "D (опис.) — верхний предел диапазона частот ионозонда (10 или 20 МГц)"@ru, "URSI descriptive letter D"@en .
+iono:DL_E a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "E" ;
+    rdfs:label "E (опис.) — нижний предел диапазона частот ионозонда (1 МГц)"@ru, "URSI descriptive letter E"@en .
+iono:DL_F a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "F" ;
+    rdfs:label "F (опис.) — рассеянные отражения (spread)"@ru, "URSI descriptive letter F"@en .
+iono:DL_G a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "G" ;
+    rdfs:label "G (опис.) — малая плотность ионизации отражающей области"@ru, "URSI descriptive letter G"@en ;
+    rdfs:comment "«Условие G»: а) foF2 − foF1 < 0,5 МГц → foF2 с G (при полном отсутствии F2 — пара EG; M3000F2 и hpF2 ЗАМЕНЯЮТСЯ буквой G); б) foEs ИЛИ fbEs ≤ foE → G у foEs И fbEs; в) след Es не горизонтален → h′Es с EG. РД с. 63 печ. Формы Q6–Q7."@ru .
+iono:DL_H a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "H" ;
+    rdfs:label "H (опис.) — расслоение в области (стратификация, в т.ч. F1.5)"@ru, "URSI descriptive letter H"@en .
+iono:DL_K a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "K" ;
+    rdfs:label "K (опис.) — корпускулярная (ночная) область E"@ru, "URSI descriptive letter K"@en ;
+    rdfs:comment "Во время бури ночью — отражения, похожие на дневной регулярный E (слой Layer_Ek ядра); foE(частиц) может превышать ночную foF2 — исключение из порядка Q1 (Ф-16б). РД с. 64 печ.; [UAG23A] рис. 4.33."@ru .
+iono:DL_L a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "L" ;
+    rdfs:label "L (опис.) — нет чёткого перегиба F1/F2 (или горизонтального участка F2)"@ru, "URSI descriptive letter L"@en ;
+    rdfs:comment "Применяется к foF1, M3000F1, иногда h′F2. РД с. 64 печ."@ru .
+iono:DL_M a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "M" ;
+    rdfs:label "M (опис.) — невозможно различить O- и X-компоненты"@ru, "URSI descriptive letter M"@en .
+iono:DL_N a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "N" ;
+    rdfs:label "N (опис.) — измерение не поддаётся интерпретации"@ru, "URSI descriptive letter N"@en ;
+    rdfs:comment "Чаще всего при наклонных отражениях — нормативное признание класса «наклонное эхо» как помехи интерпретации ВЗ. РД с. 64 печ."@ru .
+iono:DL_O a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "O" ;
+    rdfs:label "O (опис.) — измерение относится к обыкновенной компоненте"@ru, "URSI descriptive letter O"@en .
+iono:DL_P a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "P" ;
+    rdfs:label "P (опис.) — рассеянные следы типа полярной шпоры"@ru, "URSI descriptive letter P"@en .
+iono:DL_Q a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "Q" ;
+    rdfs:label "Q (опис.) — диапазонное (по дальности) рассеяние"@ru, "URSI descriptive letter Q"@en .
+iono:DL_R a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "R" ;
+    rdfs:label "R (опис.) — отклоняющее поглощение вблизи критической частоты"@ru, "URSI descriptive letter R"@en .
+iono:DL_S a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "S" ;
+    rdfs:label "S (опис.) — радиопомехи или атмосферные помехи"@ru, "URSI descriptive letter S"@en ;
+    rdfs:comment "Нормативный класс для RFI-«столбцов» на ионограмме."@ru .
+iono:DL_T a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "T" ;
+    rdfs:label "T (опис.) — значение из ряда наблюдений при противоречивом наблюдении"@ru, "URSI descriptive letter T"@en .
+iono:DL_V a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "V" ;
+    rdfs:label "V (опис.) — разветвлённый след вблизи критической частоты"@ru, "URSI descriptive letter V"@en .
+iono:DL_W a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "W" ;
+    rdfs:label "W (опис.) — отражения за пределами записываемого диапазона высот"@ru, "URSI descriptive letter W"@en .
+iono:DL_X a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "X" ;
+    rdfs:label "X (опис.) — измерение относится к необыкновенной компоненте"@ru, "URSI descriptive letter X"@en .
+iono:DL_Y a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "Y" ;
+    rdfs:label "Y (опис.) — прерывистый след (лакуна), аномальный ход вблизи foF2"@ru, "URSI descriptive letter Y"@en .
+iono:DL_Z a owl:NamedIndividual , iono:DescriptiveLetter ; iono:letterSymbol "Z" ;
+    rdfs:label "Z (опис.) — измерение относится к третьей (Z) магнитоионной компоненте"@ru, "URSI descriptive letter Z"@en ;
+    rdfs:comment "Z-след характерен для высокоширотных пунктов; компонента iono:zComponent в ядре."@ru .
+
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:DL_A iono:DL_B iono:DL_C iono:DL_D iono:DL_E
+   iono:DL_F iono:DL_G iono:DL_H iono:DL_K iono:DL_L iono:DL_M iono:DL_N iono:DL_O iono:DL_P
+   iono:DL_Q iono:DL_R iono:DL_S iono:DL_T iono:DL_V iono:DL_W iono:DL_X iono:DL_Y iono:DL_Z ) .
+
+# ---------------------------------------------------------------------
+#  2. Классы точности (§6.5.5, с. 65–67 печ.)
+#     Пороги — в SHACL-формах Q4–Q5; здесь — словарь состояний.
+# ---------------------------------------------------------------------
+
+iono:AccuracyClass a owl:Class ; rdfs:label "Класс точности значения"@ru, "accuracy class"@en ;
+    rdfs:comment "0.2.0: oneOf снят (М-08); закрытость — SHACL H4. Четыре ступени [РД2023] §6.5.5."@ru .
+iono:accurate a owl:NamedIndividual , iono:AccuracyClass ;
+    rdfs:label "точное"@ru, "accurate"@en ;
+    rdfs:comment "Неточность в допуске: foE ±0,05 МГц; foF2 ±0,1 МГц ИЛИ ±2 % (берётся большее — Ф-09а!); foEs/fbEs при частотном разрыве ≤ 0,3 МГц. [РД2023] §6.5.5.2, §6.5.5.4, §6.5.5.5."@ru .
+iono:estimated a owl:NamedIndividual , iono:AccuracyClass ;
+    rdfs:label "оценочное (с буквой U)"@ru, "estimated"@en ;
+    rdfs:comment "foE ±(0,05–0,15) МГц; foF2 ±(0,1–0,2) МГц или 2–5 %; разрыв Es 0,3–0,4 МГц. Сопровождается U + описательной буквой причины."@ru .
+iono:limitValue a owl:NamedIndividual , iono:AccuracyClass ;
+    rdfs:label "предельное (с буквой E или D)"@ru, "limit value"@en ;
+    rdfs:comment "Третья ступень РД (С-16): foE ±(0,15–0,2); foF2 ±(0,2–0,3) или 5–10 %; разрыв Es 0,4–0,5 МГц — значение записывается как предельное с E (меньше) или D (больше) по условиям. §6.5.5.2 содержит внутренний разнобой («больше ±0,4 МГц» против логики «±0,2, т.е. диапазон 0,4») — зафиксировано, не наследуем молча (Ф-09в)."@ru .
+iono:replacedByLetter a owl:NamedIndividual , iono:AccuracyClass ;
+    rdfs:label "число заменено буквой"@ru, "replaced by letter"@en ;
+    rdfs:comment "При невозможности измерения числовое значение заменяется описательной буквой (A, B, C, G …). [РД2023] §6.5.4.3."@ru .
+iono:doubtful a owl:NamedIndividual , iono:AccuracyClass ;
+    rdfs:label "сомнительное (устар., см. estimated)"@ru, "doubtful"@en ;
+    owl:deprecated true ;
+    rdfs:comment "0.2.0: «недостоверно или сомнительно» — определение буквы U, т.е. ступени estimated (С-16). Оставлено для совместимости, использовать estimated либо limitValue."@ru .
+
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:accurate iono:estimated iono:limitValue iono:replacedByLetter ) .
+
+iono:hasAccuracyClass a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range iono:AccuracyClass ;
+    rdfs:label "класс точности"@ru, "has accuracy class"@en ;
+    rdfs:comment "Согласованность с буквами проверяет форма Q9 (estimated ⇒ U)."@ru .
+
+# ---------------------------------------------------------------------
+#  3. Причины отсутствия значения — ДВА словаря (Ф-08):
+#     ИОНКА (§6.6.1, с. 75 печ.) и УСФРЕ НЗ (§7.3.4.2, §7.3.6).
+#     Цифры совпадают частично: в УСФРЕ нет 1, 8, 9; смысл 0 и 2 другой.
+# ---------------------------------------------------------------------
+
+iono:NoValueCause a owl:Class ; rdfs:label "Причина отсутствия параметра"@ru, "no value cause"@en .
+iono:IonkaNoValueCause a owl:Class ; rdfs:subClassOf iono:NoValueCause ;
+    rdfs:label "Причина отсутствия (код ИОНКА, ВЗ)"@ru, "IONKA no value cause"@en ;
+    rdfs:comment "Цифра при косой черте в урсиграмме ИОНКА. [РД2023] §6.6.1, с. 75 печ."@ru .
+iono:UsfreNoValueCause a owl:Class ; rdfs:subClassOf iono:NoValueCause ;
+    rdfs:label "Причина отсутствия сигнала (код УСФРЕ, НЗ)"@ru, "USFRE no value cause"@en ;
+    rdfs:comment "РД §7.3.4.2, §7.3.6 (с. 104, 108–109 печ.): допустимы 0, 2–7; цифр 1, 8, 9 НЕТ; 2 = «поглощение» (без деления), 0 = «полное отсутствие сигналов при исправной аппаратуре / помехи / слабая ионизация»."@ru .
+
+iono:hasNoValueCause a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:CharacteristicDatum ; rdfs:range iono:NoValueCause ;
+    rdfs:label "причина отсутствия значения"@ru, "has no value cause"@en ;
+    rdfs:comment "Обязательна, когда нет hasNumericValue и нет заменяющей описательной буквы (форма Q8)."@ru .
+
+iono:causeDigit a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain iono:NoValueCause ; rdfs:range xsd:integer ; rdfs:label "цифра кода"@ru, "cause digit"@en .
+
+# индивиды ИОНКА; 3–7 читаются одинаково в обоих кодах — им дан двойной тип
+iono:NVC_1 a owl:NamedIndividual , iono:IonkaNoValueCause ; iono:causeDigit 1 ; rdfs:label "1 — экранирование"@ru, "IONKA no-value cause 1"@en .
+iono:NVC_2 a owl:NamedIndividual , iono:IonkaNoValueCause ; iono:causeDigit 2 ; rdfs:label "2 — неотклоняющее поглощение (ИОНКА)"@ru, "IONKA no-value cause 2"@en .
+iono:NVC_3 a owl:NamedIndividual , iono:IonkaNoValueCause , iono:UsfreNoValueCause ; iono:causeDigit 3 ; rdfs:label "3 — неисправность аппаратуры"@ru, "IONKA no-value cause 3"@en .
+iono:NVC_4 a owl:NamedIndividual , iono:IonkaNoValueCause , iono:UsfreNoValueCause ; iono:causeDigit 4 ; rdfs:label "4 — верхний предел (по частоте) аппаратуры"@ru, "IONKA no-value cause 4"@en .
+iono:NVC_5 a owl:NamedIndividual , iono:IonkaNoValueCause , iono:UsfreNoValueCause ; iono:causeDigit 5 ; rdfs:label "5 — нижний предел (по частоте) аппаратуры"@ru, "IONKA no-value cause 5"@en .
+iono:NVC_6 a owl:NamedIndividual , iono:IonkaNoValueCause , iono:UsfreNoValueCause ; iono:causeDigit 6 ; rdfs:label "6 — диффузность"@ru, "IONKA no-value cause 6"@en .
+iono:NVC_7 a owl:NamedIndividual , iono:IonkaNoValueCause , iono:UsfreNoValueCause ; iono:causeDigit 7 ; rdfs:label "7 — малая плотность ионизации или отсутствие слоя"@ru, "IONKA no-value cause 7"@en .
+iono:NVC_8 a owl:NamedIndividual , iono:IonkaNoValueCause ; iono:causeDigit 8 ; rdfs:label "8 — сложная ионограмма"@ru, "IONKA no-value cause 8"@en .
+iono:NVC_9 a owl:NamedIndividual , iono:IonkaNoValueCause ; iono:causeDigit 9 ; rdfs:label "9 — отклоняющее поглощение"@ru, "IONKA no-value cause 9"@en .
+iono:NVC_0 a owl:NamedIndividual , iono:IonkaNoValueCause ; iono:causeDigit 0 ; rdfs:label "0 — всевозможные прочие причины и помехи"@ru, "IONKA no-value cause 0"@en .
+# специфичные значения УСФРЕ (другой смысл тех же цифр)
+iono:UVC_2 a owl:NamedIndividual , iono:UsfreNoValueCause ; iono:causeDigit 2 ;
+    rdfs:label "2 — поглощение (УСФРЕ, без деления на виды)"@ru, "USFRE no-value cause 2"@en .
+iono:UVC_0 a owl:NamedIndividual , iono:UsfreNoValueCause ; iono:causeDigit 0 ;
+    rdfs:label "0 — отсутствие сигналов при исправной аппаратуре / помехи / слабая ионизация (УСФРЕ)"@ru, "USFRE no-value cause 0"@en .
+
+[] a owl:AllDifferent ; owl:distinctMembers ( iono:NVC_0 iono:NVC_1 iono:NVC_2 iono:NVC_3 iono:NVC_4
+   iono:NVC_5 iono:NVC_6 iono:NVC_7 iono:NVC_8 iono:NVC_9 iono:UVC_0 iono:UVC_2 ) .
+
+# ---------------------------------------------------------------------
+#  4. Соответствие «описательная буква ↔ цифра ИОНКА» (решение вопроса 1
+#     сверки 05-shiryi-merge.md: два словаря одного смысла в разных
+#     носителях; связь — явная, а не отождествление).
+# ---------------------------------------------------------------------
+
+iono:correspondsToCause a owl:ObjectProperty ;
+    rdfs:domain iono:DescriptiveLetter ; rdfs:range iono:NoValueCause ;
+    rdfs:label "соответствует причине отсутствия в коде ИОНКА"@ru, "corresponds to cause"@en ;
+    rdfs:comment "Используется формой Q10 (согласованность буквы и цифры)."@ru .
+
+iono:DL_A iono:correspondsToCause iono:NVC_1 .   # экранирование Es
+iono:DL_B iono:correspondsToCause iono:NVC_2 .   # неотклоняющее поглощение
+iono:DL_C iono:correspondsToCause iono:NVC_3 .   # аппаратура/часы/питание
+iono:DL_D iono:correspondsToCause iono:NVC_4 .   # верхний предел частоты
+iono:DL_E iono:correspondsToCause iono:NVC_5 .   # нижний предел частоты
+iono:DL_F iono:correspondsToCause iono:NVC_6 .   # диффузность (рассеяние)
+iono:DL_Q iono:correspondsToCause iono:NVC_6 .   # диапазонное рассеяние → «диффузность»
+iono:DL_G iono:correspondsToCause iono:NVC_7 .   # малая плотность/отсутствие слоя
+iono:DL_N iono:correspondsToCause iono:NVC_8 .   # не интерпретируется → «сложная ионограмма» (Ф-10)
+iono:DL_R iono:correspondsToCause iono:NVC_9 .   # отклоняющее поглощение
+iono:DL_S iono:correspondsToCause iono:NVC_0 .   # помехи → «прочие причины и помехи»
+
+# --- канонические определения (IAO definition; род + видовое отличие) — 2026-09-05 ---
+iono:QualifyingLetter obo:IAO_0000115 """Оценочная буква — информационный объект, который является буквой URSI, уточняющей СПОСОБ получения или статус числового значения характеристики ([РД2023] §6.5.4.2)."""@ru , """A qualifying letter is an information content entity that is a URSI letter qualifying HOW a characteristic value was obtained or its status."""@en .
+iono:DescriptiveLetter obo:IAO_0000115 """Описательная буква — информационный объект, который является буквой URSI, указывающей ПРИЧИНУ особенности или отсутствия значения характеристики ([РД2023] §6.5.4.3)."""@ru , """A descriptive letter is an information content entity that is a URSI letter indicating WHY a characteristic value is peculiar or missing."""@en .
+iono:AccuracyClass obo:IAO_0000115 """Класс точности — информационный объект, который является градацией достоверности значения характеристики по порогам [РД2023] §6.5.5."""@ru , """An accuracy class is an information content entity that is a grade of characteristic-value reliability per the thresholds of [РД2023] §6.5.5."""@en .
