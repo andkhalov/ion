@@ -15,15 +15,19 @@ validate.py — единственная правильная точка вхо�
 Вердикт по sh:Violation; sh:Warning — отдельным списком (в SHACL
 conforms=false при любых результатах, поэтому считаем сами).
 
-Запуск:  python validate.py                 — регрессионный набор
-         python validate.py scene.ttl [...] — проверка своих сцен
+Запуск:  python -m pyon.validate                 — регрессионный набор (18 сценариев)
+         python -m pyon.validate scene.ttl [...] — проверка своих сцен
 
 Числовые литералы в сценах строить ТОЛЬКО так (T-01):
-    from validate import dec
-    Literal(dec(8.2))   # или dec(8.2) напрямую — это уже rdflib.Literal
+    from pyon.validate import dec
+    dec(8.2)   # это уже rdflib.Literal(xsd:decimal)
+
+Графы форм (гигиена и содержательные) парсятся один раз на процесс (кэш `_shapes`):
+гейт на тысячах сцен (Э3 §3.3) не должен перечитывать TTL на каждую сцену.
 """
 import sys
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path
 
 import owlrl
@@ -59,6 +63,12 @@ def load_vocabulary() -> Graph:
     return load_graph(VOCAB_FILES)
 
 
+@lru_cache(maxsize=None)
+def _shapes(kind: str) -> Graph:
+    """Кэш графов форм: 'hygiene' (H0–H5) или 'main' (S/V/Q). pyshacl их не изменяет."""
+    return load_graph(HYGIENE_FILES if kind == "hygiene" else MAIN_SHAPE_FILES)
+
+
 def _results(report_graph):
     out = {"Violation": [], "Warning": [], "Info": []}
     for r in report_graph.subjects(RDF.type, SH.ValidationResult):
@@ -71,7 +81,7 @@ def _results(report_graph):
 def validate_scene(data: Graph, vocab: Graph | None = None, verbose: bool = True):
     """Трёхстадийный конвейер (T-01/T-02). Возвращает dict: hygiene_ok, violations, warnings."""
     vocab = vocab if vocab is not None else load_vocabulary()
-    hygiene = load_graph(HYGIENE_FILES)
+    hygiene = _shapes("hygiene")
     g = data + vocab
 
     # Стадия A: гигиена ДО замыкания (ill-typed литерал роняет и owlrl, и формы).
@@ -102,7 +112,7 @@ def validate_scene(data: Graph, vocab: Graph | None = None, verbose: bool = True
     rb = _results(rep_b)
 
     # Стадия C: содержательные формы
-    _, rep, _ = pyshacl.validate(data_graph=g, shacl_graph=load_graph(MAIN_SHAPE_FILES),
+    _, rep, _ = pyshacl.validate(data_graph=g, shacl_graph=_shapes("main"),
                                  inference="none", advanced=True)
     r = _results(rep)
     result["violations"] = r["Violation"] + rb["Violation"]

@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from pyon import digi_formats as dfm                              # noqa: E402
 from pyon import oblique_synth as obs                             # noqa: E402
-from pyon.dataset_cache import masks_from_sao                     # noqa: E402
+from pyon import canon                                            # noqa: E402
 
 
 class VerticalDataset(Dataset):
@@ -55,12 +55,12 @@ class VerticalDataset(Dataset):
     def __getitem__(self, i: int):
         try:
             x = np.ascontiguousarray(dfm.read_canon(str(ROOT / self.paths[i])), dtype=np.uint8)
-            y = np.ascontiguousarray(masks_from_sao(dfm.read_sao(str(ROOT / self.saos[i]))), dtype=np.int8)
+            y = np.ascontiguousarray(canon.masks_from_sao(dfm.read_sao(str(ROOT / self.saos[i]))), dtype=np.int8)
         except Exception:
             # битый файл не должен ронять эпоху: отдаём пустой образец (фон),
             # доля таких — метрика санити E0 (логировать в TensorBoard)
-            x = np.zeros((2, 128, 128), np.uint8)
-            y = np.zeros((128, 128), np.int8)
+            x = np.zeros((2, canon.NH, canon.NF), np.uint8)
+            y = np.zeros((canon.NH, canon.NF), np.int8)
         return torch.from_numpy(x), torch.from_numpy(y)
 
 

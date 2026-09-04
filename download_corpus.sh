@@ -24,7 +24,8 @@
 #                                    (EI764-2023, GA762-2024). Оценка: 8 станция-лет, ~60-90 ГБ
 #                                    (у EI764/GA762 с 2020 г. — 192 файла/сутки).
 #   ./download_corpus.sh year ST YYYY — произвольный станция-год (напр. year SMJ67 2010)
-#   PAR=16 ./download_corpus.sh p1   — число параллельных загрузок (по умолчанию 8)
+#   PAR=4 RATE=6 ./download_corpus.sh p1 — параллельных загрузок (умолч. 4) и стартов/с (умолч. 6);
+#                                    больше НЕЛЬЗЯ: NOAA отвечает 429 (см. RATE ниже)
 # ФАКТЫ (проба 2026-09-05 с локальной машины + проба 2026-09-04 на сервере, research-дисциплина):
 # (1) TR170 (Тромсё, новый код), SO166, KI167, MM168, MG560, SD266, EB040, EA036, AT138,
 #     MO155-2022 — только scaled/. (2) ОПРОВЕРГНУТО «высокоширотных станций с сырьём нет»:
@@ -38,7 +39,10 @@ BASE="https://data.ngdc.noaa.gov/instruments/remote-sensing/active/profilers-sou
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/data/corpus"
 TMPDIR_LOCAL="$HERE/local/tmp"; mkdir -p "$TMPDIR_LOCAL"
-PAR=${PAR:-8}   # параллельных загрузок (переопределяется окружением: PAR=16 ./download_corpus.sh p1)
+PAR=${PAR:-4}    # параллельных загрузок; RATE — стартов передач в секунду (curl --rate).
+RATE=${RATE:-6}  # ФАКТ 2026-09-04: PAR=16 + параллельный листинг → NOAA отвечает HTTP 429 (лимит
+                 # запросов) на ВСЁ, включая одиночные запросы; после остановки лимит снимается за
+                 # минуты. Держать PAR ≤ 4 и RATE ≤ 6/s; 429 curl повторяет с паузой (--retry-delay).
 
 P0=( MO155:2019 JI91J:2022 JR055:2022 PQ052:2022 )
 P2=( MO155:2013 MO155:2014 JI91J:2013 JI91J:2014
@@ -76,7 +80,8 @@ fetch_day() {   # $1 станция, $2 год, $3 день (001..366) → curl-
 download() {    # $1 = curl-config файл
   local n; n=$(grep -c '^url' "$1")
   echo "  к скачиванию: $n файлов"
-  [[ "$n" -gt 0 ]] && curl -sf --retry 3 -m 300 --parallel --parallel-max $PAR --config "$1"
+  [[ "$n" -gt 0 ]] && curl -sf --retry 5 --retry-delay 20 -m 300 --rate "${RATE}/s" \
+                        --parallel --parallel-max "$PAR" --config "$1"
   return 0
 }
 

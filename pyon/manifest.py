@@ -14,6 +14,7 @@ manifest.py — опись корпуса: единственная «сборк
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import re
 import sys
@@ -27,24 +28,39 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from pyon import digi_formats as dfm           # noqa: E402
-from pyon.dataset_cache import collect_files   # noqa: E402
 
 SCALED_KEYS = ["foF2", "foF1", "hF", "foE", "foEs", "fxI", "M3000F2", "fmin"]
 _STEM_RE = re.compile(r"([A-Z0-9]{5})_(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})")
+RAW_PATTERNS = ["data/corpus/*/*/*/ionogram/*.RSF", "data/corpus/*/*/*/ionogram/*.SBF",
+                "data/RSF-samples-w-img-n-sao-n-dft/ionogram/*.RSF",
+                "data/SBF-samples-w-img-n-sao/ionogram/*.SBF"]
+
+
+def collect_files() -> list[str]:
+    """Все сырые файлы корпуса и образцов (отсортированный список абсолютных путей)."""
+    return sorted({f for pat in RAW_PATTERNS for f in glob.glob(str(ROOT / pat))})
+
+
+def stem_time(stem: str):
+    """SSSSS_YYYYDDDHHMMSS → (станция, pd.Timestamp) или None."""
+    m = _STEM_RE.match(os.path.basename(stem))
+    if not m:
+        return None
+    st, yy, ddd, hh, mm, ss = m.groups()
+    return st, pd.Timestamp(int(yy), 1, 1) + pd.Timedelta(days=int(ddd) - 1, hours=int(hh),
+                                                          minutes=int(mm), seconds=int(ss))
 
 
 def _row(f: str):
     try:
         stem = os.path.basename(f)
-        m = _STEM_RE.match(stem)
-        if not m:
+        parsed = stem_time(stem)
+        if parsed is None:
             return None
         sao_f = f.replace("/ionogram/", "/scaled/").rsplit(".", 1)[0] + ".SAO"
         if not os.path.exists(sao_f):
             return None
-        st, yy, ddd, hh, mm, ss = m.groups()
-        t = (pd.Timestamp(int(yy), 1, 1) + pd.Timedelta(days=int(ddd) - 1,
-             hours=int(hh), minutes=int(mm), seconds=int(ss)))
+        st, t = parsed
         row = dict(path=os.path.relpath(f, ROOT), sao=os.path.relpath(sao_f, ROOT),
                    station=st, time=t.isoformat(), fmt=stem.rsplit(".", 1)[-1].upper())
         sao = dfm.read_sao(sao_f)

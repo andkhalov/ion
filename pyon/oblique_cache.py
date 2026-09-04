@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-oblique_cache.py — параллельная сборка синтетического НЗ-датасета из SAO корпуса.
+oblique_cache.py — smoke-сборка фиксированного синтетического НЗ-набора из SAO корпуса
+(Э3 §2.2: только малые фиксированные наборы; в full-обучении НЗ-маски синтезируются на лету
+в `loader.ObliqueDataset`).
 
 На каждый SAO: маски классов OB_CLASSES (BG/F2/F1/E/Es/MH) на решётке НЗ
 (2–24 МГц × 300–3200 км группового пути) для дальностей D_SET = (300, 800, 1500) км
@@ -25,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from pyon import digi_formats as dfm            # noqa: E402
 from pyon import oblique_synth as obs           # noqa: E402
-from pyon.dataset_cache import collect_files    # noqa: E402
+from pyon.manifest import collect_files         # noqa: E402
 
 SHARD = 2000
 

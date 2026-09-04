@@ -22,8 +22,9 @@ import numpy as np
 import pandas as pd
 
 import pyon.digi_formats as dfm
+from pyon import oblique_synth as obs
 
-R_EARTH = 6371.0
+R_EARTH = obs.R_E
 
 # порядок и подписи как на Ion2PNG (левая колонка отчёта дигизонда)
 REPORT_ROWS = [
@@ -51,25 +52,12 @@ def c_level(sao: dict) -> str:
     return f"{int(a[9]):02d}" if len(a) >= 10 else "n/a"
 
 
-def muf_secant(trace_f: np.ndarray, trace_h: np.ndarray, distances_km=(100, 200, 400, 600, 800, 1000, 1500, 3000)) -> dict:
-    """Оценка MUF(D) по O-следу F2 и закону секанса для зеркала на действующей высоте над сферической Землёй.
-
-    sin(phi) = R sin(Δ) / sqrt((R+h')² + R² − 2R(R+h')cos Δ), Δ = D/2R;  f_ob = f_v / cos(phi);
-    MUF(D) = max по точкам следа.  Это грубая «зеркальная» оценка (без трассировки лучей в профиле),
-    поэтому обычно на 5–15 % ниже ARTIST-овской MUF(3000), которая считается по истинному профилю.
-    """
-    out = {}
-    f = np.asarray(trace_f, float); h = np.asarray(trace_h, float)
-    ok = np.isfinite(f) & np.isfinite(h) & (f > 0)
-    f, h = f[ok], h[ok]
-    for D in distances_km:
-        if len(f) == 0:
-            out[D] = np.nan; continue
-        d = D / (2 * R_EARTH)
-        denom = np.sqrt((R_EARTH + h) ** 2 + R_EARTH ** 2 - 2 * R_EARTH * (R_EARTH + h) * np.cos(d))
-        sinphi = np.clip(R_EARTH * np.sin(d) / denom, 0, 0.999999)
-        out[D] = float(np.max(f / np.sqrt(1 - sinphi ** 2)))
-    return out
+def muf_secant(trace_f, trace_h, distances_km=(100, 200, 400, 600, 800, 1000, 1500, 3000)) -> dict:
+    """MUF(D) по O-следу F2: зеркало на действующей высоте над сферической Землёй, закон секанса —
+    та же физика, что `oblique_synth.muf` (ревизия 2026-09-04: собственная формула снята, обе
+    давали тождественный результат; tests/test_physics.py). Обычно на ~10 % ниже ARTIST MUF(3000),
+    считаемой по истинному профилю (k_эмп ≈ 1.11, Э2 §6.0)."""
+    return {D: obs.muf(trace_f, trace_h, float(D), 1, "spherical") for D in distances_km}
 
 
 def digisonde_report(ion_file: str, sao_file: str, png_file: str | None = None, fmax: float | None = None,
