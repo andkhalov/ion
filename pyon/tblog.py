@@ -69,7 +69,7 @@ class TBLog:
                       (pm[r], CMAP_MASK, dict(vmin=0, vmax=len(MASK_COLORS) - 1))]
             for c, (img, cm, kw) in enumerate(panels):
                 ax = axes[r, c]
-                ax.imshow(img, origin="lower", cmap=cm, aspect="auto", extent=extent, **kw)
+                ax.imshow(img, origin="lower", cmap=cm, aspect="auto", extent=extent, **kw, interpolation="nearest")
                 if r == 0:
                     ax.set_title(["вход (O)", "цель", "предсказание"][c], fontsize=9)
                 if c == 0:
@@ -127,7 +127,7 @@ class TBLog:
                 lines.append(f"{name:7s}{fa:>8s}{fb:>8s}{fd:>7s}")
             axt.text(0, 1, "\n".join(lines), family="monospace", fontsize=7.5, va="top", ha="left",
                      transform=axt.transAxes)
-            ax.imshow(x[0], origin="lower", cmap="Greys", aspect="auto", extent=extent, vmin=0, vmax=1, alpha=0.9)
+            ax.imshow(x[0], origin="lower", cmap="Greys", aspect="auto", extent=extent, vmin=0, vmax=1, alpha=0.9, interpolation="nearest")
             for ci in range(1, len(MASK_COLORS) - 1):
                 if (y == ci).any():
                     rr, cc = np.nonzero(y == ci)
@@ -197,7 +197,7 @@ class TBLog:
                       (np.asarray(s1)[r, 0], "inferno", dict(vmin=0, vmax=1)), (np.asarray(s2)[r, 0], "inferno", dict(vmin=0, vmax=1))]
             for c, (img, cm, kw) in enumerate(panels):
                 ax = axes[r, c]
-                ax.imshow(img, origin="lower", cmap=cm, aspect="auto", extent=extent, **kw)
+                ax.imshow(img, origin="lower", cmap=cm, aspect="auto", extent=extent, **kw, interpolation="nearest")
                 if r == 0:
                     ax.set_title(["реальное (O)", "маска ARTIST", "рендер 1", "рендер 2"][c], fontsize=9)
                 if c == 0:
