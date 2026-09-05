@@ -4,10 +4,14 @@ renderer.py — нейрорендерер шума: обратная задач
 
 Модель (Э2 §4.2, перенос из iono_study.ipynb, ячейка 24): U-Net; вход — one-hot маска классов
 (5 каналов ВЗ; класс MH наклонной маски подаётся в канал F2 — кратник выглядит как F2-эхо)
-+ 2 координатных канала + 1 канал шума z ~ U(0,1); выход на каждую поляризацию (O, X): логит
-вероятности активности пикселя p и амплитуда a. Лосс: Σ_pol [BCE(p, 1[X>0]) + |a − X|·1[X>0]];
-сэмплирование X_синт = 1[u < p]·a, u ~ U(0,1) — источник спекл-текстуры (каждая реализация новая;
-в обучении НЗ-модели работает как бесконечная аугментация, Tobin 2017).
++ 2 координатных канала + 1 канал шума z ~ U(0,1) [+ 1 ПОСТОЛБЦОВЫЙ шумовой канал z_col(f) ~ U(0,1),
+`col_noise`: помеховые полосы реального сырья идут на всю высоту, попиксельный шум их дать не может;
+E4pre 2026-09-05]; выход на каждую поляризацию (O, X): логит вероятности активности p и амплитуда —
+либо медиана a (L1-регресс; `hetero=False`, как в прототипе), либо μ и log σ (`hetero=True`, гауссов
+NLL по активным пикселям: без разброса амплитуд KS реальное/рендер держался 0.32). Лосс:
+Σ_pol [BCE(p, 1[X>0]; pos_weight) + NLL/L1 по 1[X>0]]; сэмплирование X_синт = 1[u < σ(z − ln w)]·a,
+a = clip(μ + σ·ε, 0, 1) — u ~ U(0,1), ε ~ N(0,1): источник спекл-текстуры (каждая реализация
+новая; в обучении НЗ-модели работает как бесконечная аугментация, Tobin 2017).
 
 Метрики качества синтетики (Э3 §3.4): KS-расстояние амплитудных распределений активных пикселей
 (реальное vs рендер), L1-расстояние профилей плотности эха по частоте (RFI-полосы) и по высоте,
@@ -48,13 +52,16 @@ MH2F2 = torch.tensor([0, 1, 2, 3, 4, 1])                    # НЗ-классы 
 
 
 class Renderer(nn.Module):
-    """U-Net(n_classes + 3 → 4): [p_O, a_O, p_X, a_X]."""
+    """U-Net(n_classes + 3 [+1] → 2·npol): на поляризацию [p, a] (npol=2) или [p, μ, log σ] (npol=3)."""
 
-    def __init__(self, base: int = 16, depth: int = 3, n_classes: int = N_CLASSES, pos_weight: float = 8.0):
+    def __init__(self, base: int = 16, depth: int = 3, n_classes: int = N_CLASSES, pos_weight: float = 8.0,
+                 hetero: bool = False, col_noise: bool = False):
         super().__init__()
         self.n_classes = n_classes
         self.pos_weight = float(pos_weight)     # тот же, что в render_loss: нужен для калибровки при сэмплировании
-        self.net = UNet(n_classes + 3, 4, base=base, depth=depth)
+        self.hetero, self.col_noise = bool(hetero), bool(col_noise)
+        self.npol = 3 if hetero else 2
+        self.net = UNet(n_classes + 3 + int(col_noise), 2 * self.npol, base=base, depth=depth)
 
     def make_input(self, mask: torch.Tensor, noise: torch.Tensor | None = None) -> torch.Tensor:
         """mask [B,H,W] int (ВЗ-классы 0..4; НЗ-маски сначала пропустить через MH2F2)."""
@@ -64,7 +71,10 @@ class Renderer(nn.Module):
         hh = torch.linspace(0, 1, H, device=dev).view(1, 1, H, 1).expand(B, 1, H, W)
         ww = torch.linspace(0, 1, W, device=dev).view(1, 1, 1, W).expand(B, 1, H, W)
         z = torch.rand(B, 1, H, W, device=dev) if noise is None else noise
-        return torch.cat([oh, hh, ww, z], 1)
+        chans = [oh, hh, ww, z]
+        if self.col_noise:
+            chans.append(torch.rand(B, 1, 1, W, device=dev).expand(B, 1, H, W))
+        return torch.cat(chans, 1)
 
     def forward(self, mask: torch.Tensor) -> torch.Tensor:
         return self.net(self.make_input(mask))
@@ -77,18 +87,31 @@ class Renderer(nn.Module):
         out = self.forward(mask)
         xs = []
         for c in range(2):
-            p = torch.sigmoid(out[:, 2 * c] - math.log(self.pos_weight)); a = out[:, 2 * c + 1].clamp(0, 1)
-            xs.append((torch.rand_like(p) < p).float() * a)
+            o = out[:, self.npol * c:self.npol * (c + 1)]
+            p = torch.sigmoid(o[:, 0] - math.log(self.pos_weight))
+            a = o[:, 1]
+            if self.hetero:
+                a = a + Fn.softplus(o[:, 2]) * torch.randn_like(a)
+            xs.append((torch.rand_like(p) < p).float() * a.clamp(0, 1))
         return torch.stack(xs, 1)
 
 
-def render_loss(out: torch.Tensor, x: torch.Tensor, pos_weight: float = 8.0) -> torch.Tensor:
-    """x — реальное сырьё [B,2,H,W] в 0..1."""
+def render_loss(out: torch.Tensor, x: torch.Tensor, pos_weight: float = 8.0, hetero: bool = False) -> torch.Tensor:
+    """x — реальное сырьё [B,2,H,W] в 0..1. hetero: гауссов NLL по (μ, log σ) вместо L1 по медиане
+    (значения лосса между режимами несравнимы; сравнивать по noise_stats)."""
     bce = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight, device=x.device))
+    npol = 3 if hetero else 2
     loss = 0.0
     for c in range(2):
+        o = out[:, npol * c:npol * (c + 1)]
         act = (x[:, c] > 0).float()
-        loss = loss + bce(out[:, 2 * c], act) + ((out[:, 2 * c + 1] - x[:, c]).abs() * act).sum() / (act.sum() + 1)
+        loss = loss + bce(o[:, 0], act)
+        if hetero:
+            sig = Fn.softplus(o[:, 2]) + 1e-3
+            nll = (o[:, 1] - x[:, c]) ** 2 / (2 * sig ** 2) + torch.log(sig)
+            loss = loss + (nll * act).sum() / (act.sum() + 1)
+        else:
+            loss = loss + ((o[:, 1] - x[:, c]).abs() * act).sum() / (act.sum() + 1)
     return loss
 
 
@@ -119,6 +142,8 @@ class RenderConfig:
     base: int = 16
     depth: int = 3
     pos_weight: float = 8.0
+    hetero: bool = True             # амплитуда как (μ, log σ) + гауссов NLL; False — медиана/L1 (прототип)
+    col_noise: bool = True          # постолбцовый шумовой канал (помеховые полосы на всю высоту)
     amp: bool = True
     workers: int = 8
     seed: int = 0
@@ -156,7 +181,7 @@ def train_renderer(cfg: RenderConfig) -> dict:
     Xi, Yi, _ = training.decode(img_rows.reset_index(drop=True), min(cfg.workers, 2))
     titles = [f"{r.station} {str(r.time)[:16]}" for r in img_rows.itertuples()]
 
-    net = Renderer(cfg.base, cfg.depth, pos_weight=cfg.pos_weight).to(dev)
+    net = Renderer(cfg.base, cfg.depth, pos_weight=cfg.pos_weight, hetero=cfg.hetero, col_noise=cfg.col_noise).to(dev)
     opt = torch.optim.Adam(net.parameters(), cfg.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, cfg.epochs), eta_min=cfg.lr / 100) if cfg.sched == "cosine" else None
     scaler = torch.amp.GradScaler(enabled=(cfg.amp and dev.type == "cuda"))
@@ -171,7 +196,7 @@ def train_renderer(cfg: RenderConfig) -> dict:
             x = training.to_input(Xt[j], dev); y = Yt[j].to(dev).long()
             with torch.autocast("cuda", enabled=scaler.is_enabled()):
                 out = net(y)
-            loss = render_loss(out.float(), x, cfg.pos_weight)
+            loss = render_loss(out.float(), x, cfg.pos_weight, cfg.hetero)
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward(); scaler.step(opt); scaler.update()
             tot += loss.item() * len(j); n += len(j)
@@ -182,7 +207,7 @@ def train_renderer(cfg: RenderConfig) -> dict:
         with torch.no_grad():
             for k in range(0, len(Xv), 128):
                 x = training.to_input(Xv[k:k + 128], dev); y = Yv[k:k + 128].to(dev).long()
-                vt += render_loss(net(y).float(), x, cfg.pos_weight).item() * len(x); vn += len(x)
+                vt += render_loss(net(y).float(), x, cfg.pos_weight, cfg.hetero).item() * len(x); vn += len(x)
                 if k < 1024:
                     xs_r.append(x.cpu().numpy()); xs_s.append(net.sample(y).cpu().numpy())
         m = {"epoch": ep, "train/loss": tot / max(n, 1), "val/loss": vt / max(vn, 1), "time/train_s": t_train,
@@ -216,7 +241,8 @@ def train_renderer(cfg: RenderConfig) -> dict:
 def load_renderer(path: str | Path, dev="cuda") -> Renderer:
     ck = torch.load(path, map_location=dev)
     c = ck["cfg"]
-    net = Renderer(c.get("base", 16), c.get("depth", 3), pos_weight=c.get("pos_weight", 8.0)).to(dev)
+    net = Renderer(c.get("base", 16), c.get("depth", 3), pos_weight=c.get("pos_weight", 8.0),
+                   hetero=c.get("hetero", False), col_noise=c.get("col_noise", False)).to(dev)   # старые чекпойнты: L1/без z_col
     net.load_state_dict(ck["state_dict"]); net.eval()
     return net
 

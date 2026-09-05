@@ -56,7 +56,9 @@ class ProfileHead(nn.Module):
     три канала на каждую строку h: fp(h) в МГц (softplus ≥ 0), логит валидности (нижняя сторона:
     h_min профиля ≤ h ≤ hmF2) и **hmF2 прямой регрессией** — доля решётки высот в (0, 1), одна на
     образец, размноженная по h (prefull 2026-09-05: верх валидности по порогу 0.5 систематически
-    недотягивал 16 км до hmF2 ARTIST, мягкие ридауты не помогали → прямая супервизия).
+    недотягивал 16 км до hmF2 ARTIST, мягкие ридауты не помогали → прямая супервизия). Регрессия —
+    мягкий argmax по строкам: третий выход 1D-свёрток — оценка «здесь верх», hmF2 = Σ_h softmax·h
+    (позиция входит по построению; вариант «mean-pool → Linear» на smoke не сходился: bias +16 км).
     Цель — NHPC-профиль ARTIST (`canon.profile_from_sao`)."""
 
     def __init__(self, cin: int, hidden: int = 32):
@@ -64,15 +66,16 @@ class ProfileHead(nn.Module):
         self.reduce = nn.Sequential(nn.Conv2d(cin, hidden, 3, padding=1), nn.ReLU())
         self.net = nn.Sequential(nn.Conv1d(2 * hidden, hidden, 5, padding=2), nn.ReLU(),
                                  nn.Conv1d(hidden, hidden, 5, padding=2), nn.ReLU(),
-                                 nn.Conv1d(hidden, 2, 1))
-        self.hm = nn.Linear(2 * hidden, 1)
+                                 nn.Conv1d(hidden, 3, 1))
 
     def forward(self, feat):
         z = self.reduce(feat)
         z = torch.cat([z.mean(3), z.amax(3)], 1)          # [B, 2·hidden, H]
-        out = self.net(z)                                   # [B, 2, H]
-        hm = torch.sigmoid(self.hm(z.mean(2)))              # [B, 1] — hmF2 в долях решётки
-        return torch.stack([nn.functional.softplus(out[:, 0]), out[:, 1], hm.expand(-1, out.shape[2])], 1)
+        out = self.net(z)                                   # [B, 3, H]
+        H = out.shape[2]
+        h_frac = torch.linspace(0, 1, H, device=out.device, dtype=out.dtype)
+        hm = (torch.softmax(out[:, 2].float(), 1) * h_frac.float()).sum(1, keepdim=True).to(out.dtype)  # [B, 1]
+        return torch.stack([nn.functional.softplus(out[:, 0]), out[:, 1], hm.expand(-1, H)], 1)
 
 
 class UNet(nn.Module):

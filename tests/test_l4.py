@@ -30,13 +30,19 @@ def test_profile_peaks_day_like():
 
 
 def test_renderer_shapes_and_sampling():
-    net = renderer.Renderer(base=8, depth=2)
     y = torch.zeros(2, 128, 128, dtype=torch.long); y[:, 40:43, 20:60] = 1
+    x = torch.rand(2, 2, 128, 128) * (torch.rand(2, 2, 128, 128) > 0.9)
+    net = renderer.Renderer(base=8, depth=2)                                   # прототипный режим (старые чекпойнты)
     inp = net.make_input(y)
     assert inp.shape == (2, renderer.N_CLASSES + 3, 128, 128) and inp[:, -1].min() >= 0 and inp[:, -1].max() <= 1
     out = net(y); assert out.shape == (2, 4, 128, 128)
-    x = torch.rand(2, 2, 128, 128) * (torch.rand(2, 2, 128, 128) > 0.9)
     loss = renderer.render_loss(out, x); assert torch.isfinite(loss) and loss > 0
+    s = net.sample(y); assert s.shape == (2, 2, 128, 128) and s.min() >= 0 and s.max() <= 1
+    net = renderer.Renderer(base=8, depth=2, hetero=True, col_noise=True)      # E4: (μ, log σ) + постолбцовый шум
+    inp = net.make_input(y); assert inp.shape == (2, renderer.N_CLASSES + 4, 128, 128)
+    assert torch.equal(inp[:, -1, 0], inp[:, -1, 77])                           # z_col одинаков по высоте
+    out = net(y); assert out.shape == (2, 6, 128, 128)
+    assert torch.isfinite(renderer.render_loss(out, x, hetero=True))
     s = net.sample(y); assert s.shape == (2, 2, 128, 128) and s.min() >= 0 and s.max() <= 1
     st = renderer.noise_stats(x.numpy(), s.numpy())
     assert 0 <= st["ks_amp_O"] <= 1 and st["active_real_O"] > 0
