@@ -245,7 +245,8 @@ def train_oblique(cfg: ObliqueConfig) -> dict:
         if len(Yi) and (ep % cfg.images_every == 0 or ep == cfg.epochs - 1):
             (rundir / "png").mkdir(exist_ok=True)
             log.ionograms("images/fixed_set", Xv[:len(Yi)].numpy(), Yi.numpy(), pm[:len(Yi)], ep, extent=EXTENT,
-                          titles=[f"D={float(d):.0f}" for d in Di], xlabel="МГц", ylabel="P′, км")
+                          titles=[f"D={float(d):.0f}" for d in Di], xlabel="МГц", ylabel="P′, км",
+                          save=rundir / "png" / f"ionograms_ep{ep:02d}.png")
         for d, rows, Yd, m1d, m2d in day_sets:
             if not len(Yd):
                 continue

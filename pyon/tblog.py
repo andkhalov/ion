@@ -54,9 +54,9 @@ class TBLog:
 
     # ---------------------------------------------------------------- панели ионограмм
     def ionograms(self, tag: str, x, y, pm, step: int, extent=(1, 15, 80, 720), titles=None,
-                  n_classes: int = 5, xlabel="МГц", ylabel="км"):
+                  n_classes: int = 5, xlabel="МГц", ylabel="км", save=None):
         """K строк × 3 панели: вход (канал O) | цель | предсказание. x: [K,2,H,W] 0..1 или uint8;
-        y, pm: [K,H,W] int. extent — физические оси (ВЗ: 1–15 МГц × 80–720 км)."""
+        y, pm: [K,H,W] int. extent — физические оси (ВЗ: 1–15 МГц × 80–720 км). save — PNG-копия."""
         x = np.asarray(x, dtype=np.float32)
         if x.max() > 1.5:
             x = x / 255.0
@@ -77,6 +77,8 @@ class TBLog:
                 if r == K - 1:
                     ax.set_xlabel(xlabel, fontsize=8)
                 ax.tick_params(labelsize=7)
+        if save is not None:
+            fig.savefig(save, dpi=80)
         self.w.add_figure(tag, fig, step)
         plt.close(fig)
 
