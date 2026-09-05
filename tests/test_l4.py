@@ -55,10 +55,10 @@ def test_oblique_muf_readouts_match_labels(sao_ji):
 
 def test_hF2_above_foF1():
     y = np.zeros((canon.NH, canon.NF), np.int8)
-    jf = canon.to_grid(np.linspace(2.0, 4.0, 30), canon.F_MIN, canon.F_MAX, canon.NF)
-    y[canon.to_grid([180], canon.H_MIN, canon.H_MAX, canon.NH)[0], jf] = canon.CLASSES.index("F1")
-    jf2 = canon.to_grid(np.linspace(4.1, 7.0, 40), canon.F_MIN, canon.F_MAX, canon.NF)
-    y[canon.to_grid([340], canon.H_MIN, canon.H_MAX, canon.NH)[0], jf2] = canon.CLASSES.index("F2")
-    y[canon.to_grid([190], canon.H_MIN, canon.H_MAX, canon.NH)[0], jf[:5]] = canon.CLASSES.index("F2")  # «F2» ниже каспа
+    def band(cls, f0, f1, h):                       # след толщиной 3 строки (ридаут требует ≥2 пикселей в колонке)
+        jf = canon.to_grid(np.linspace(f0, f1, 40), canon.F_MIN, canon.F_MAX, canon.NF)
+        jh = canon.to_grid([h], canon.H_MIN, canon.H_MAX, canon.NH)[0]
+        y[jh - 1:jh + 2, jf] = canon.CLASSES.index(cls)
+    band("F1", 2.0, 4.0, 180); band("F2", 4.1, 7.0, 340); band("F2", 2.0, 2.3, 190)   # «F2» ниже каспа F1
     r = scaler.scale_vertical(y, None, f_b=1.3)
     assert abs(r["hF2"] - 340) < 6 and abs(r["hF"] - 180) < 6 and abs(r["foF1"] - 4.0) < 0.12
