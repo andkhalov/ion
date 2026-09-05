@@ -94,7 +94,7 @@ class TrainConfig:
     max_steps: int = 0              # dry: шагов в эпохе
     holdout: str = ""               # leave-one-station-out: станция исключается из train
     block_shuffle: int = 2048       # блочный порядок чтения в нулевой эпохе (0 = случайный)
-    cache_gb: float = 6.0           # RAM-кэш train (Э3 §2.2): 0 = только поток
+    cache_gb: float = 10.0          # RAM-кэш train (Э3 §2.2): 0 = только поток; p1 (~180 тыс.) ≈ 9 ГБ
     # архитектура (Э3 §7: d4 b32 BN, без dropout, со skip)
     depth: int = 4
     base: int = 32

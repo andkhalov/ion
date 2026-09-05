@@ -183,6 +183,29 @@ class TBLog:
         self.w.add_figure(tag, fig, step)
         plt.close(fig)
 
+    # ---------------------------------------------------------------- рендерер: реальное vs реализации
+    def renders(self, tag: str, x, y, s1, s2, step: int, extent=(1, 15, 80, 720), titles=None,
+                save: str | Path | None = None):
+        """K строк × 4: реальное (O) | маска | рендер 1 (O) | рендер 2 (O) — CLAUDE §2.4 «реальное vs 2 реализации»."""
+        x = np.asarray(x, np.float32); x = x / 255.0 if x.max() > 1.5 else x
+        K = len(x)
+        fig, axes = plt.subplots(K, 4, figsize=(13, 2.6 * K), squeeze=False, constrained_layout=True)
+        for r in range(K):
+            panels = [(x[r, 0], "inferno", dict(vmin=0, vmax=1)), (np.asarray(y)[r], CMAP_MASK, dict(vmin=0, vmax=len(MASK_COLORS) - 1)),
+                      (np.asarray(s1)[r, 0], "inferno", dict(vmin=0, vmax=1)), (np.asarray(s2)[r, 0], "inferno", dict(vmin=0, vmax=1))]
+            for c, (img, cm, kw) in enumerate(panels):
+                ax = axes[r, c]
+                ax.imshow(img, origin="lower", cmap=cm, aspect="auto", extent=extent, **kw)
+                if r == 0:
+                    ax.set_title(["реальное (O)", "маска ARTIST", "рендер 1", "рендер 2"][c], fontsize=9)
+                if c == 0:
+                    ax.set_ylabel((titles[r] if titles else "") + "\nкм", fontsize=7)
+                ax.tick_params(labelsize=7)
+        if save:
+            fig.savefig(save, dpi=100)
+        self.w.add_figure(tag, fig, step)
+        plt.close(fig)
+
     # ---------------------------------------------------------------- гистограммы
     def hist(self, tag: str, values, step: int):
         v = np.asarray(values, float)
