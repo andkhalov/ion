@@ -14,8 +14,14 @@ train — DataLoader с воркерами; фиксированный val-по�
 стратификация (станция, день/ночь, C-level ≤22/>22, спокойные/возмущённые); SHACL-гейт на
 gate_n сценах (+ ARTIST-референс один раз); панели ионограмм на фиксированном наборе;
 суточные треки foF2(t) на фиксированных сутках (RMSE и корреляция хода, Э3 §3.5).
-Артефакты: runs/<этап>/<ран>/{events, metrics.csv, weights.pt, config.json, val_readouts.csv,
-summary.json}; набор логирования — runs/<этап>/logging_set.json (создаётся ОДИН раз и не меняется).
+Артефакты runs/<этап>/<ран>/: events (TensorBoard), metrics.csv (строка на эпоху, все скаляры),
+weights.pt (ЛУЧШАЯ эпоха по best_metric, по умолчанию val/foF2_med) и weights_last.pt (последняя;
+оба — state_dict + cfg + метрики эпохи), config.json (конфиг + provenance: git-коммит, md5
+манифеста, версии torch/CUDA/cuDNN/python, GPU, argv, время старта), val_readouts.csv (ридауты
+лучшей модели по val-поднабору: foF2/h′F/foE/foEs pred vs ARTIST, L_logic по образцам),
+tracks.csv (суточные треки лучшей модели на фиксированных сутках), fixed_set_preds.npz (вход,
+цель, предсказание фиксированного набора панелей), summary.json (best и last эпохи).
+Набор логирования — runs/<этап>/logging_set.json (создаётся ОДИН раз и не меняется).
 
 Запуск:  python -m pyon.training --stage E1 --run baseline --variant baseline --manifest data/manifest.csv
          python -m pyon.training --dry            (1 шаг, 8 val, 2 сцены; проверка форм и путей)
@@ -25,7 +31,9 @@ summary.json}; набор логирования — runs/<этап>/logging_set
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, fields
@@ -72,11 +80,34 @@ class TrainConfig:
     max_steps: int = 0              # dry: шагов в эпохе (0 = все)
     holdout: str = ""               # leave-one-station-out: станция исключается из train
     block_shuffle: int = 0          # >0: loader.BlockShuffleSampler(block) — если корпус не влезает в page cache
+    # архитектура U-Net (дефолт = прототип, 117 605 параметров; исследование — DIARY 2026-09-05)
+    depth: int = 3
+    base: int = 16
+    norm: str = "batch"             # batch | group | none
+    dropout: float = 0.0
+    skip: bool = True
+    best_metric: str = "val/foF2_med"   # критерий лучшей эпохи (меньше — лучше); weights.pt = лучшая
     dry: bool = False
     device: str = "cuda"
 
 
 # ---------------------------------------------------------------------------- данные
+def _git_commit() -> str:
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
+                              text=True, timeout=10).stdout.strip() or "?"
+    except Exception:
+        return "?"
+
+
+def _md5(path: Path) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def set_seed(seed: int):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -84,8 +115,12 @@ def set_seed(seed: int):
 
 def load_split(cfg: TrainConfig):
     df = pd.read_csv(ROOT / cfg.manifest)
-    if cfg.limit:   # smoke/dry: по половине лимита из каждого сплита (первые по порядку манифеста)
-        df = pd.concat([g.head(max(1, cfg.limit // 2)) for _, g in df.groupby("split")])
+    if cfg.limit:   # smoke/dry/подмножество: по половине лимита из каждого сплита, РАВНОМЕРНО по манифесту
+        parts = []  # (манифест отсортирован по станции и времени → пропорционально станциям и сезонам)
+        for _, g in df.groupby("split"):
+            n = min(len(g), max(1, cfg.limit // 2))
+            parts.append(g.iloc[np.unique(np.linspace(0, len(g) - 1, n).round().astype(int))])
+        df = pd.concat(parts)
     df = df.reset_index(drop=True)
     tr = df[df.split == "train"]
     va = df[df.split == "val"]
@@ -276,8 +311,12 @@ def train(cfg: TrainConfig) -> dict:
     dev = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     v = VARIANTS[cfg.variant]
     rundir = ROOT / "runs" / cfg.stage / cfg.run
-    log = tblog.TBLog(rundir, asdict(cfg) | dict(device=str(dev), torch=torch.__version__,
-                                              cuda=torch.version.cuda, gpu=torch.cuda.get_device_name(0) if dev.type == "cuda" else "-"))
+    prov = dict(device=str(dev), torch=torch.__version__, cuda=torch.version.cuda,
+                cudnn=torch.backends.cudnn.version(), python=sys.version.split()[0],
+                gpu=torch.cuda.get_device_name(0) if dev.type == "cuda" else "-",
+                git_commit=_git_commit(), manifest_md5=_md5(ROOT / cfg.manifest), argv=" ".join(sys.argv),
+                started=time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+    log = tblog.TBLog(rundir, asdict(cfg) | prov)
     t_all = time.time()
 
     df, tr, va = load_split(cfg)
@@ -306,14 +345,16 @@ def train(cfg: TrainConfig) -> dict:
         day_sets.append((d, rows.reset_index(drop=True), Xd))
     print(f"  набор логирования: {len(img_rows)} панелей, {len(day_sets)} суток-треков", flush=True)
 
-    net = UNet(2, len(canon.CLASSES), coords=v["coords"]).to(dev)
+    net = UNet(2, len(canon.CLASSES), base=cfg.base, depth=cfg.depth, norm=cfg.norm, dropout=cfg.dropout,
+               skip=cfg.skip, coords=v["coords"]).to(dev)
     opt = torch.optim.Adam(net.parameters(), cfg.lr)
     scaler = torch.amp.GradScaler(enabled=(cfg.amp and dev.type == "cuda"))
     ce = nn.CrossEntropyLoss(weight=torch.tensor(CE_WEIGHTS, device=dev))
     vocab = vd.load_vocabulary()
     artist_gate: dict = {}
-    print(f"  U-Net {n_params(net)} параметров, вариант {cfg.variant} (logic={v['logic']}, coords={v['coords']}), "
-          f"AMP={scaler.is_enabled()}", flush=True)
+    print(f"  U-Net {n_params(net)} параметров (depth {cfg.depth}, base {cfg.base}, norm {cfg.norm}, dropout {cfg.dropout}, "
+          f"skip {cfg.skip}), вариант {cfg.variant} (logic={v['logic']}, coords={v['coords']}), AMP={scaler.is_enabled()}", flush=True)
+    best = dict(value=float("inf"), epoch=-1)
 
     hist = []
     for ep in range(cfg.epochs):
@@ -372,18 +413,44 @@ def train(cfg: TrainConfig) -> dict:
         m["time/eval_s"] = time.time() - t_ev
         log.scalars({k: v_ for k, v_ in m.items() if k != "epoch"}, ep)
         log.row(m, ep); hist.append(m)
-        torch.save({"state_dict": net.state_dict(), "cfg": asdict(cfg), "epoch": ep}, rundir / "weights.pt")
+        ckpt = {"state_dict": net.state_dict(), "cfg": asdict(cfg), "epoch": ep, "metrics": m}
+        torch.save(ckpt, rundir / "weights_last.pt")
+        crit = m.get(cfg.best_metric, np.nan)
+        if np.isfinite(crit) and crit < best["value"]:
+            best = dict(value=float(crit), epoch=ep)
+            torch.save(ckpt, rundir / "weights.pt")          # weights.pt = лучшая эпоха по best_metric
         print(f"  ep{ep}: train CE {m['train/CE']:.3f}" + (f" logic {m['train/logic']:.4f}" if v["logic"] else "")
               + f" | val CE {m['val/CE']:.3f} L_hinge {m['val/logic_total']:.4f} IoU_F2 {m.get('val/IoU_F2', np.nan):.3f} "
               f"foF2 RMSE {m.get('val/foF2_rmse', np.nan):.2f} med {m.get('val/foF2_med', np.nan):.2f} "
               f"gate {m.get('gate/violations', np.nan):.0%} (ARTIST {m.get('gate/artist_violations', np.nan):.0%}) "
               f"| {t_train:.0f}+{m['time/eval_s']:.0f} с, {m['time/train_samples_per_s']:.0f} обр/с", flush=True)
 
+    # финальные артефакты — от ЛУЧШИХ весов (weights.pt), чтобы csv/npz соответствовали сохранённой модели
+    last_m = hist[-1]
+    if best["epoch"] >= 0 and best["epoch"] != cfg.epochs - 1:
+        net.load_state_dict(torch.load(rundir / "weights.pt", map_location=dev)["state_dict"])
+        pm, comps = predict(net, Xv, dev)
+        rt = readouts_table(pm, va); rt.insert(0, "logic_total", sum(comps.values()))
     rt.insert(0, "time", va.time.values); rt.insert(0, "station", va.station.values); rt.insert(0, "path", va.path.values)
     rt.to_csv(rundir / "val_readouts.csv", index=False)
-    summary = {k: v_ for k, v_ in hist[-1].items()} | {"run": cfg.run, "stage": cfg.stage, "variant": cfg.variant,
-                                                       "n_train": int(len(tr)), "n_val": int(len(va)),
-                                                       "params": n_params(net), "time_total_s": time.time() - t_all}
+    tracks = []
+    for d, rows, Xd in day_sets:
+        if not len(Xd):
+            continue
+        pmd, _ = predict(net, Xd, dev)
+        for k in range(len(pmd)):
+            tracks.append(dict(station=d["station"], date=d["date"], kind=d["kind"], time=rows.time.iloc[k],
+                               foF2_artist=float(rows.foF2.iloc[k]), foF2_pred=canon.fmax_readout(pmd[k], 1),
+                               hF_artist=float(rows.hF.iloc[k]), hF_pred=canon.hmin_readout(pmd[k], 1)))
+    pd.DataFrame(tracks).to_csv(rundir / "tracks.csv", index=False)
+    if len(Xi):
+        pmi, _ = predict(net, Xi, dev)
+        np.savez_compressed(rundir / "fixed_set_preds.npz", pred=pmi, target=Yi.numpy(), x=Xi.numpy(),
+                            path=np.array(img_rows.path.values, dtype=object), title=np.array(img_titles, dtype=object))
+    summary = {"run": cfg.run, "stage": cfg.stage, "variant": cfg.variant, "n_train": int(len(tr)), "n_val": int(len(va)),
+               "params": n_params(net), "time_total_s": time.time() - t_all,
+               "best_epoch": best["epoch"], "best_metric": cfg.best_metric, "best_value": best["value"],
+               "best": (hist[best["epoch"]] if best["epoch"] >= 0 else {}), "last": last_m}
     (rundir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float), encoding="utf-8")
     log.close()
     print(f"[{cfg.stage}/{cfg.run}] готово за {time.time() - t_all:.0f} с → {rundir}", flush=True)
