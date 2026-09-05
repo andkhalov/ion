@@ -7,11 +7,17 @@ fmin, fxI, h′F, h′F2, h′E, h′Es, hmF2, hmF1, hmE, MUF(D) по дальн
 
 Соглашения (те же, что у прототипа и `canon`):
   критическая/предельная частота слоя — последняя колонка с ≥ min_pixels пикселями класса;
-  h′ слоя — 5-й перцентиль высот класса (нижняя кромка); h′F2 — нижняя кромка F2, h′F — нижняя
-  кромка F-области (min по F1/F2); fmin — первая колонка с любым следом;
-  fxI — по магнитоионному соотношению fx² − fx·fB = fo² от foF2 (X-след не сегментируется; Э2 §2.6);
-  MUF(D) — закон секанса на сферической Земле по полилинии F2 (`oblique_synth.muf`, k = 1 —
-  систематически ~10 % ниже ARTIST MUF(3000), считаемой по профилю; Э2 §6.0);
+  h′ слоя — минимум ЦЕНТРАЛЬНОЙ линии следа (по колонкам с ≥2 пикселями класса — медиана высот;
+  `h_lower`): нижняя кромка маски (5-й перцентиль строк, `canon.hmin_readout`) на растре ±1 строка
+  давала на самих масках ARTIST сдвиг −5 (h′E) … −8 км (h′Es); центральная линия — 0 … −2.6 км
+  (калибровка 2026-09-05, 1500 val-масок; Э3 §4 санити измерителя);
+  h′F2 — начало следа F2 выше foF1 (при наличии F1), h′F — min(h′F1, h′F2); fmin — первая колонка
+  с любым следом; fxI — по магнитоионному соотношению fx² − fx·fB = fo² от foF2 (X-след не
+  сегментируется; Э2 §2.6);
+  MUF(D) — закон секанса на сферической Земле по полилинии F2 (`oblique_synth.muf`) × k = K_MUF =
+  1.11 (эмпирический множитель Э2 §6.0: на масках ARTIST при k = 1 недобор −1.8 МГц к ARTIST
+  MUF(3000), при 1.11 — −0.1 МГц, медиана |Δ| 0.08). Синтетический НЗ-мир остаётся при k = 1;
+  множитель — только для таблицы «как у дигизонда»;
   hmF2/hmF1/hmE — из профиля fp(h): высота максимума fp в пределах предсказанной валидности
   (hmE/hmF1 — локальные максимумы ниже соответствующих критических частот, если есть).
 Все выходы — float, отсутствующее = NaN.
@@ -26,15 +32,23 @@ from pyon import canon
 from pyon import oblique_synth as obs
 
 MUF_DISTANCES = (100, 200, 400, 600, 800, 1000, 1500, 3000)
+K_MUF = 1.11          # эмпирический множитель кривизны к ARTIST MUF(3000) (Э2 §6.0)
 
 
-def trace_from_mask(pm: np.ndarray, ci: int, f_axis=canon.f_axis, h_axis=canon.h_axis):
-    """Полилиния следа класса ci: по каждой колонке с пикселями класса — медиана их высот."""
-    cols = np.flatnonzero((pm == ci).any(0))
+def trace_from_mask(pm: np.ndarray, ci: int, f_axis=canon.f_axis, h_axis=canon.h_axis, min_pixels: int = 2):
+    """Полилиния (центральная линия) следа класса ci: по каждой колонке с ≥ min_pixels пикселями
+    класса — медиана их высот (одиночные пиксели предсказания не образуют след)."""
+    cols = np.flatnonzero((pm == ci).sum(0) >= min_pixels)
     if not len(cols):
         return np.array([]), np.array([])
     hs = np.array([np.median(h_axis[np.flatnonzero(pm[:, j] == ci)]) for j in cols])
     return f_axis[cols], hs
+
+
+def h_lower(pm: np.ndarray, ci: int, f_axis=canon.f_axis, h_axis=canon.h_axis) -> float:
+    """h′ слоя: минимум центральной линии следа класса ci (NaN, если следа нет)."""
+    _, hs = trace_from_mask(pm, ci, f_axis, h_axis)
+    return float(hs.min()) if len(hs) else float("nan")
 
 
 def fx_from_fo(fo: float, f_b: float) -> float:
@@ -58,7 +72,7 @@ def profile_peaks(fp: np.ndarray, h_axis=canon.h_axis):
 
 
 def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 1.3,
-                   distances=MUF_DISTANCES) -> dict:
+                   distances=MUF_DISTANCES, k_muf: float = K_MUF) -> dict:
     """Маска [NH, NF] классов canon.CLASSES (+ профиль fp(h) [NH], NaN вне валидности) → таблица."""
     C = canon.CLASSES.index
     r = {}
@@ -67,16 +81,16 @@ def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 
     # h′F2 по ARTIST — минимальная действующая высота следа F2 ВЫШЕ foF1 (начало следа F2 после
     # каспа F1); без F1 — нижняя кромка всей маски F2. Иначе при наличии F1 наша hF2 уходила на
     # 150+ км ниже ARTIST (панели prefull 2026-09-05).
-    r["hF1"] = canon.hmin_readout(pm, C("F1"))
+    r["hF1"] = h_lower(pm, C("F1"))
     if np.isfinite(r["foF1"]):
         pm_f2 = pm.copy(); pm_f2[:, canon.f_axis <= r["foF1"]] = 0
-        r["hF2"] = canon.hmin_readout(pm_f2, C("F2"))
+        r["hF2"] = h_lower(pm_f2, C("F2"))
         if not np.isfinite(r["hF2"]):
-            r["hF2"] = canon.hmin_readout(pm, C("F2"))
+            r["hF2"] = h_lower(pm, C("F2"))
     else:
-        r["hF2"] = canon.hmin_readout(pm, C("F2"))
-    r["hE"] = canon.hmin_readout(pm, C("E"))
-    r["hEs"] = canon.hmin_readout(pm, C("Es"))
+        r["hF2"] = h_lower(pm, C("F2"))
+    r["hE"] = h_lower(pm, C("E"))
+    r["hEs"] = h_lower(pm, C("Es"))
     r["hF"] = float(np.nanmin([r["hF2"], r["hF1"]])) if np.isfinite([r["hF2"], r["hF1"]]).any() else float("nan")
     any_cols = np.flatnonzero((pm > 0).sum(0) >= 2)
     r["fmin"] = float(canon.f_axis[any_cols[0]]) if len(any_cols) else float("nan")
@@ -84,7 +98,7 @@ def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 
     fq, vh = trace_from_mask(pm, C("F2"))
     if len(fq) >= 2:
         for D in distances:
-            r[f"MUF{D}"] = obs.muf(fq, vh, float(D), 1, "spherical")
+            r[f"MUF{D}"] = k_muf * obs.muf(fq, vh, float(D), 1, "spherical")
         r["M3000F2"] = r["MUF3000"] / r["foF2"] if np.isfinite(r["foF2"]) and r["foF2"] > 0 else float("nan")
     else:
         for D in distances:

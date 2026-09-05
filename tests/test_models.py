@@ -52,5 +52,5 @@ def test_profile_from_sao_and_scaler(sao_ji):
     r = scaler.scale_vertical(y, p, f_b=canon.gyro_from_sao(sao_ji))
     assert abs(r["foF2"] - 8.2) <= 0.12 and abs(r["hmF2"] - 369.9) < 6
     assert abs(r["fxI"] - sao_ji["scaled"]["fxI"]) < 0.2               # 8.6 по fo²=fx(fx−fB), fB=0.8
-    assert np.isfinite(r["MUF3000"]) and 0.85 < r["MUF3000"] / sao_ji["scaled"]["MUF3000F2"] < 0.95
+    assert np.isfinite(r["MUF3000"]) and 0.97 < r["MUF3000"] / sao_ji["scaled"]["MUF3000F2"] < 1.03   # k = K_MUF = 1.11
     assert np.isnan(r["foE"]) and np.isnan(r["hmE"])

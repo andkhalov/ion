@@ -22,6 +22,7 @@ renderer.py — нейрорендерер шума: обратная задач
 """
 from __future__ import annotations
 
+import math
 import argparse
 import json
 import sys
@@ -49,9 +50,10 @@ MH2F2 = torch.tensor([0, 1, 2, 3, 4, 1])                    # НЗ-классы 
 class Renderer(nn.Module):
     """U-Net(n_classes + 3 → 4): [p_O, a_O, p_X, a_X]."""
 
-    def __init__(self, base: int = 16, depth: int = 3, n_classes: int = N_CLASSES):
+    def __init__(self, base: int = 16, depth: int = 3, n_classes: int = N_CLASSES, pos_weight: float = 8.0):
         super().__init__()
         self.n_classes = n_classes
+        self.pos_weight = float(pos_weight)     # тот же, что в render_loss: нужен для калибровки при сэмплировании
         self.net = UNet(n_classes + 3, 4, base=base, depth=depth)
 
     def make_input(self, mask: torch.Tensor, noise: torch.Tensor | None = None) -> torch.Tensor:
@@ -69,11 +71,13 @@ class Renderer(nn.Module):
 
     @torch.no_grad()
     def sample(self, mask: torch.Tensor) -> torch.Tensor:
-        """Маска → синтетическое сырьё [B,2,H,W] в 0..1 (новая реализация спекла при каждом вызове)."""
+        """Маска → синтетическое сырьё [B,2,H,W] в 0..1 (новая реализация спекла при каждом вызове).
+        Калибровка: BCE с pos_weight = w сходится к шансам w·p/(1−p), поэтому вероятность активности
+        берём как σ(z − ln w) (E4pre 2026-09-05: без поправки доля активных 0.44 против 0.14 у реального)."""
         out = self.forward(mask)
         xs = []
         for c in range(2):
-            p = torch.sigmoid(out[:, 2 * c]); a = out[:, 2 * c + 1].clamp(0, 1)
+            p = torch.sigmoid(out[:, 2 * c] - math.log(self.pos_weight)); a = out[:, 2 * c + 1].clamp(0, 1)
             xs.append((torch.rand_like(p) < p).float() * a)
         return torch.stack(xs, 1)
 
@@ -152,7 +156,7 @@ def train_renderer(cfg: RenderConfig) -> dict:
     Xi, Yi, _ = training.decode(img_rows.reset_index(drop=True), min(cfg.workers, 2))
     titles = [f"{r.station} {str(r.time)[:16]}" for r in img_rows.itertuples()]
 
-    net = Renderer(cfg.base, cfg.depth).to(dev)
+    net = Renderer(cfg.base, cfg.depth, pos_weight=cfg.pos_weight).to(dev)
     opt = torch.optim.Adam(net.parameters(), cfg.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, cfg.epochs), eta_min=cfg.lr / 100) if cfg.sched == "cosine" else None
     scaler = torch.amp.GradScaler(enabled=(cfg.amp and dev.type == "cuda"))
@@ -212,7 +216,7 @@ def train_renderer(cfg: RenderConfig) -> dict:
 def load_renderer(path: str | Path, dev="cuda") -> Renderer:
     ck = torch.load(path, map_location=dev)
     c = ck["cfg"]
-    net = Renderer(c.get("base", 16), c.get("depth", 3)).to(dev)
+    net = Renderer(c.get("base", 16), c.get("depth", 3), pos_weight=c.get("pos_weight", 8.0)).to(dev)
     net.load_state_dict(ck["state_dict"]); net.eval()
     return net
 
