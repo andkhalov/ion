@@ -64,8 +64,17 @@ def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 
     r = {}
     for cls in ("F2", "F1", "E", "Es"):
         r[f"fo{cls}" if cls != "Es" else "foEs"] = canon.fmax_readout(pm, C(cls))
-    r["hF2"] = canon.hmin_readout(pm, C("F2"))
+    # h′F2 по ARTIST — минимальная действующая высота следа F2 ВЫШЕ foF1 (начало следа F2 после
+    # каспа F1); без F1 — нижняя кромка всей маски F2. Иначе при наличии F1 наша hF2 уходила на
+    # 150+ км ниже ARTIST (панели prefull 2026-09-05).
     r["hF1"] = canon.hmin_readout(pm, C("F1"))
+    if np.isfinite(r["foF1"]):
+        pm_f2 = pm.copy(); pm_f2[:, canon.f_axis <= r["foF1"]] = 0
+        r["hF2"] = canon.hmin_readout(pm_f2, C("F2"))
+        if not np.isfinite(r["hF2"]):
+            r["hF2"] = canon.hmin_readout(pm, C("F2"))
+    else:
+        r["hF2"] = canon.hmin_readout(pm, C("F2"))
     r["hE"] = canon.hmin_readout(pm, C("E"))
     r["hEs"] = canon.hmin_readout(pm, C("Es"))
     r["hF"] = float(np.nanmin([r["hF2"], r["hF1"]])) if np.isfinite([r["hF2"], r["hF1"]]).any() else float("nan")

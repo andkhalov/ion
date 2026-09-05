@@ -51,3 +51,14 @@ def test_oblique_muf_readouts_match_labels(sao_ji):
     for k, lab in enumerate(labs):
         assert abs(f1[k] - lab["muf_F2"]) <= 0.2 and abs(f2[k] - lab["muf_MH"]) <= 0.2   # шаг решётки 0.17 МГц
         assert f2[k] < f1[k] and pn[k] >= obs.P_MIN
+
+
+def test_hF2_above_foF1():
+    y = np.zeros((canon.NH, canon.NF), np.int8)
+    jf = canon.to_grid(np.linspace(2.0, 4.0, 30), canon.F_MIN, canon.F_MAX, canon.NF)
+    y[canon.to_grid([180], canon.H_MIN, canon.H_MAX, canon.NH)[0], jf] = canon.CLASSES.index("F1")
+    jf2 = canon.to_grid(np.linspace(4.1, 7.0, 40), canon.F_MIN, canon.F_MAX, canon.NF)
+    y[canon.to_grid([340], canon.H_MIN, canon.H_MAX, canon.NH)[0], jf2] = canon.CLASSES.index("F2")
+    y[canon.to_grid([190], canon.H_MIN, canon.H_MAX, canon.NH)[0], jf[:5]] = canon.CLASSES.index("F2")  # «F2» ниже каспа
+    r = scaler.scale_vertical(y, None, f_b=1.3)
+    assert abs(r["hF2"] - 340) < 6 and abs(r["hF"] - 180) < 6 and abs(r["foF1"] - 4.0) < 0.12
