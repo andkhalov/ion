@@ -61,8 +61,11 @@ P3=( TR169:2009 TR169:2013
      GA762:2012 GA762:2024
      NO369:2011 YA462:2011 )
 
+# Листинги — с повторами: при 429 curl ждёт RETRY_DELAY и пробует снова (иначе усечённый/пустой
+# листинг молча выкидывает дни или целый станция-год — случай MO155-2019 / JI91J-2022, 2026-09-05).
+RETRY="--retry 6 --retry-delay 20"
 list_files() {  # $1 = URL каталога → имена файлов нужных расширений (по строке)
-  curl -sf -m 60 "$1" | grep -o 'href="[A-Za-z0-9_]*\.\(RSF\|SBF\|MMM\|16C\|SAO\)"' | sed 's/href="//;s/"$//'
+  curl -sf $RETRY -m 60 "$1" | grep -o 'href="[A-Za-z0-9_]*\.\(RSF\|SBF\|MMM\|16C\|SAO\)"' | sed 's/href="//;s/"$//'
 }
 
 fetch_day() {   # $1 станция, $2 год, $3 день (001..366) → curl-config недостающих файлов в stdout
@@ -83,7 +86,7 @@ fetch_day() {   # $1 станция, $2 год, $3 день (001..366) → curl-
 download() {    # $1 = curl-config файл
   local n; n=$(grep -c '^url' "$1")
   echo "  к скачиванию: $n файлов"
-  [[ "$n" -gt 0 ]] && curl -sf --retry 5 --retry-delay 20 -m 300 --rate "${RATE}/s" \
+  [[ "$n" -gt 0 ]] && curl -sf $RETRY -m 300 --rate "${RATE}/s" \
                         --parallel --parallel-max "$PAR" --config "$1"
   return 0
 }
@@ -92,14 +95,15 @@ run_year() {    # $1 станция, $2 год
   local st=$1 yr=$2 tmp days
   tmp=$(mktemp "$TMPDIR_LOCAL/curl.XXXXXX")
   echo "=== $st $yr"
-  days=$(curl -sf -m 60 "$BASE/$st/$yr/individual/" | grep -o 'href="[0-9][0-9][0-9]/"' | tr -dc '0-9\n')
+  days=$(curl -sf $RETRY -m 60 "$BASE/$st/$yr/individual/" | grep -o 'href="[0-9][0-9][0-9]/"' | tr -dc '0-9\n')
+  if [[ -z "$days" ]]; then echo "  ВНИМАНИЕ: пустой листинг года $st/$yr (429?) — пропущен, повторить запуск"; rm -f "$tmp"; return 1; fi
   # листинг дней — параллельно ($PAR процессов): последовательно 2 запроса × ~1.8 с × 365 дней
   # = 20+ мин на станция-год только на листинг (замер 2026-09-04)
   export -f fetch_day list_files; export BASE OUT
   printf '%s\n' $days | xargs -P "$LIST_PAR" -I{} bash -c 'fetch_day "$1" "$2" "$3"' _ "$st" "$yr" {} >> "$tmp"
   echo "  дней в листинге: $(echo "$days" | grep -c .)"
   download "$tmp"; rm -f "$tmp"
-  echo "  итого: $(find "$OUT/$st/$yr" -type f 2>/dev/null | wc -l | tr -d ' ') файлов, $(du -sh "$OUT/$st/$yr" 2>/dev/null | cut -f1)"
+  echo "  итого: $(find "$OUT/$st/$yr" -type f 2>/dev/null | wc -l | tr -d ' ') файлов, $(du -sh "$OUT/$st/$yr" 2>/dev/null | cut -f1); дней локально $(ls "$OUT/$st/$yr" 2>/dev/null | wc -l | tr -d ' ') из $(echo "$days" | grep -c .) в листинге"
 }
 
 case "${1:-p0}" in
