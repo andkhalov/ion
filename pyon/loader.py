@@ -94,6 +94,40 @@ class ObliqueDataset(Dataset):
                 torch.tensor(float(muf_f2)), torch.tensor(float(muf_mh)))
 
 
+class BlockShuffleSampler(torch.utils.data.Sampler):
+    """Перемешивание, дружелюбное к диску (корпус больше page cache, диск — HDD/QEMU):
+    индексы делятся на блоки по `block` соседних строк манифеста (манифест отсортирован по
+    станции и времени — соседние файлы лежат рядом на диске), блоки перемешиваются, внутри
+    блока — тоже; `streams` блоков читаются вперемежку (round-robin), поэтому батч из 64
+    образцов собирается из `streams` разных периодов/станций. Полностью случайный порядок
+    = block >= n. Детерминирован по (seed, epoch): вызывать set_epoch(e)."""
+
+    def __init__(self, n: int, block: int = 512, streams: int = 8, seed: int = 0):
+        self.n, self.block, self.streams, self.seed, self.epoch = n, block, streams, seed, 0
+
+    def set_epoch(self, epoch: int):
+        self.epoch = epoch
+
+    def __len__(self):
+        return self.n
+
+    def __iter__(self):
+        rng = np.random.default_rng((self.seed, self.epoch))
+        blocks = [np.arange(i, min(i + self.block, self.n)) for i in range(0, self.n, self.block)]
+        rng.shuffle(blocks)
+        for b in blocks:
+            rng.shuffle(b)
+        out = []
+        for k in range(0, len(blocks), self.streams):
+            group = blocks[k:k + self.streams]
+            L = max(len(b) for b in group)
+            for j in range(L):
+                for b in group:
+                    if j < len(b):
+                        out.append(int(b[j]))
+        return iter(out)
+
+
 def throughput(dl, n_batches: int = 20) -> float:
     """Образцов/с через DataLoader — dry-мера E0 (сравнивать с 2× скоростью шага GPU)."""
     it = iter(dl)

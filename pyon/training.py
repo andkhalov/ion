@@ -71,6 +71,7 @@ class TrainConfig:
     images_every: int = 1           # каждые N эпох
     max_steps: int = 0              # dry: шагов в эпохе (0 = все)
     holdout: str = ""               # leave-one-station-out: станция исключается из train
+    block_shuffle: int = 0          # >0: loader.BlockShuffleSampler(block) — если корпус не влезает в page cache
     dry: bool = False
     device: str = "cuda"
 
@@ -282,8 +283,10 @@ def train(cfg: TrainConfig) -> dict:
     df, tr, va = load_split(cfg)
     print(f"[{cfg.stage}/{cfg.run}] манифест {cfg.manifest}: {len(df)} строк; train {len(tr)}, val-поднабор {len(va)} "
           f"({va.station.nunique()} станций); устройство {dev}", flush=True)
-    dl = DataLoader(loader.VerticalDataset(tr), batch_size=cfg.batch, shuffle=True, num_workers=cfg.workers,
-                    persistent_workers=cfg.workers > 0, prefetch_factor=4 if cfg.workers > 0 else None,
+    sampler = loader.BlockShuffleSampler(len(tr), cfg.block_shuffle, seed=cfg.seed) if cfg.block_shuffle else None
+    dl = DataLoader(loader.VerticalDataset(tr), batch_size=cfg.batch, shuffle=sampler is None, sampler=sampler,
+                    num_workers=cfg.workers, persistent_workers=cfg.workers > 0,
+                    prefetch_factor=4 if cfg.workers > 0 else None,
                     drop_last=len(tr) >= cfg.batch, pin_memory=dev.type == "cuda")
     t0 = time.time()
     Xv, Yv = decode(va, cfg.workers)
@@ -314,6 +317,8 @@ def train(cfg: TrainConfig) -> dict:
 
     hist = []
     for ep in range(cfg.epochs):
+        if sampler is not None:
+            sampler.set_epoch(ep)
         net.train(); t_ep = time.time(); n_seen = 0
         sums = {"CE": 0.0, "logic": 0.0}; csum = {}
         for step, (x, y) in enumerate(dl):

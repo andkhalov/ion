@@ -82,3 +82,11 @@ def test_broken_file_yields_background(tmp_path, df_manifest):
     df.loc[df.index[0], "path"] = str(bad)
     x, y = loader.VerticalDataset(df)[0]
     assert int(x.max()) == 0 and int(y.max()) == 0
+
+
+def test_block_shuffle_sampler_is_permutation():
+    s = loader.BlockShuffleSampler(1000, block=128, streams=4, seed=1)
+    a = list(iter(s)); s.set_epoch(1); b = list(iter(s))
+    assert sorted(a) == list(range(1000)) and a != b            # перестановка, зависит от эпохи
+    first = a[:64]                                             # батч смешивает несколько блоков
+    assert len({i // 128 for i in first}) >= 3
