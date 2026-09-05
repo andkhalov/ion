@@ -79,7 +79,9 @@ class TrainConfig:
     images_every: int = 1           # каждые N эпох
     max_steps: int = 0              # dry: шагов в эпохе (0 = все)
     holdout: str = ""               # leave-one-station-out: станция исключается из train
-    block_shuffle: int = 0          # >0: loader.BlockShuffleSampler(block) — если корпус не влезает в page cache
+    block_shuffle: int = 2048       # >0: loader.BlockShuffleSampler(block) для нулевой эпохи (диск читается блоками)
+    cache_gb: float = 6.0           # RAM-кэш декодированных train-образцов (Э3 §2.2, IO-предел): 0 = только поток;
+                                    # активен, если весь train влезает (48 КБ/образец); заполняется в эпохе 0
     # архитектура U-Net (дефолт = прототип, 117 605 параметров; исследование — DIARY 2026-09-05)
     depth: int = 3
     base: int = 16
@@ -326,10 +328,18 @@ def train(cfg: TrainConfig) -> dict:
     print(f"[{cfg.stage}/{cfg.run}] манифест {cfg.manifest}: {len(df)} строк; train {len(tr)}, val-поднабор {len(va)} "
           f"({va.station.nunique()} станций); устройство {dev}", flush=True)
     sampler = loader.BlockShuffleSampler(len(tr), cfg.block_shuffle, seed=cfg.seed) if cfg.block_shuffle else None
-    dl = DataLoader(loader.VerticalDataset(tr), batch_size=cfg.batch, shuffle=sampler is None, sampler=sampler,
-                    num_workers=cfg.workers, persistent_workers=cfg.workers > 0,
+    dl = DataLoader(loader.WithIndex(loader.VerticalDataset(tr)), batch_size=cfg.batch, shuffle=sampler is None,
+                    sampler=sampler, num_workers=cfg.workers, persistent_workers=cfg.workers > 0,
                     prefetch_factor=4 if cfg.workers > 0 else None,
-                    drop_last=len(tr) >= cfg.batch, pin_memory=dev.type == "cuda")
+                    drop_last=False, pin_memory=dev.type == "cuda")
+    # RAM-кэш train-образцов (Э3 §2.2): активен, если весь train влезает в cache_gb
+    per_sample = 2 * canon.NH * canon.NF + canon.NH * canon.NF          # uint8 X + int8 Y
+    use_cache = cfg.cache_gb > 0 and len(tr) * per_sample <= cfg.cache_gb * 2 ** 30
+    if use_cache:
+        Xc = torch.empty((len(tr), 2, canon.NH, canon.NF), dtype=torch.uint8)
+        Yc = torch.empty((len(tr), canon.NH, canon.NF), dtype=torch.int8)
+        cached = torch.zeros(len(tr), dtype=torch.bool)
+    print(f"  RAM-кэш train: {'ВКЛ' if use_cache else 'выкл'} ({len(tr) * per_sample / 2**30:.1f} ГБ нужно, лимит {cfg.cache_gb} ГБ)", flush=True)
     t0 = time.time()
     Xv, Yv = decode(va, cfg.workers)
     print(f"  val-поднабор декодирован: X {tuple(Xv.shape)} {Xv.dtype}, Y {tuple(Yv.shape)} {Yv.dtype}, "
@@ -367,9 +377,17 @@ def train(cfg: TrainConfig) -> dict:
             sampler.set_epoch(ep)
         net.train(); t_ep = time.time(); n_seen = 0
         sums = {"CE": 0.0, "logic": 0.0}; csum = {}
-        for step, (x, y) in enumerate(dl):
+        from_ram = use_cache and bool(cached.all())
+        if from_ram:                                   # эпохи после заполнения кэша: батчи из RAM
+            perm = torch.randperm(len(tr), generator=torch.Generator().manual_seed(cfg.seed * 1000 + ep))
+            batches = ((Xc[j], Yc[j], j) for j in perm.split(cfg.batch))
+        else:
+            batches = dl
+        for step, (x, y, idx) in enumerate(batches):
             if cfg.max_steps and step >= cfg.max_steps:
                 break
+            if use_cache and not from_ram:
+                Xc[idx] = x; Yc[idx] = y; cached[idx] = True
             x, y = to_input(x, dev), y.to(dev, non_blocking=True).long()
             with torch.autocast("cuda", enabled=scaler.is_enabled()):
                 lg = net(x)
@@ -386,11 +404,11 @@ def train(cfg: TrainConfig) -> dict:
             sums["CE"] += loss_ce.item() * len(x); n_seen += len(x)
             if cfg.dry:
                 print(f"  dry: batch x {tuple(x.shape)} y {tuple(y.shape)} logits {tuple(lg.shape)} "
-                      f"CE {loss_ce.item():.3f} loss {loss.item():.3f}", flush=True)
+                      f"CE {loss_ce.item():.3f} loss {loss.item():.3f} idx[:3] {idx[:3].tolist()}", flush=True)
         t_train = time.time() - t_ep
         m = {"train/CE": sums["CE"] / max(n_seen, 1), "time/train_s": t_train,
              "time/train_samples_per_s": n_seen / max(t_train, 1e-9), "epoch": ep,
-             "train/lr": opt.param_groups[0]["lr"]}
+             "train/lr": opt.param_groups[0]["lr"], "train/from_ram": int(from_ram)}
         if sched is not None:
             sched.step()
         if v["logic"]:

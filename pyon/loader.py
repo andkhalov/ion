@@ -2,11 +2,16 @@
 """
 loader.py — потоковая подача данных в обучение (Э3 §2.2).
 
-Принцип: НИКАКИХ полнокорпусных тензорных кэшей — они не масштабируются на целевой
+Принцип: НИКАКИХ полнокорпусных ДИСКОВЫХ тензорных кэшей — они не масштабируются на целевой
 корпус (100–300 тыс. ионограмм). Декодирование сырья происходит НА ЛЕТУ в воркерах
 torch DataLoader по описи data/manifest.csv (см. pyon.manifest); префетч воркеров
 перекрывает шаг GPU. Требование Э3: суммарная скорость воркеров ≥ 2× скорости шага
 обучения — мерить в dry-прогоне (throughput()).
+IO-предел (замер 2026-09-05: корпус 33+ ГБ на диске QEMU не влезает в page cache; случайное
+чтение 200–450 обр/с против 2600 обр/с у GPU) закрывается по Э3 §2.2 ОГРАНИЧЕННЫМ RAM-кэшем
+декодированных образцов в `pyon.training` (`--cache_gb`; заполняется в нулевой эпохе через
+воркеры, далее батчи из памяти; дисковых артефактов нет) и дискодружественным порядком
+чтения `BlockShuffleSampler` для нулевой эпохи.
 
 Датасеты (тензоры отдаются КОМПАКТНЫМИ — uint8/int8: через IPC воркер→главный процесс
 идёт в 5 раз меньше байт, чем float32/int64; в тренировочном цикле на GPU:
@@ -92,6 +97,19 @@ class ObliqueDataset(Dataset):
             y, muf_f2, muf_mh = np.zeros((obs.NP, obs.NF), np.int8), np.nan, np.nan
         return (torch.from_numpy(np.ascontiguousarray(y, dtype=np.int8)), torch.tensor(d),
                 torch.tensor(float(muf_f2)), torch.tensor(float(muf_mh)))
+
+
+class WithIndex(Dataset):
+    """Обёртка: __getitem__ возвращает (*item, idx) — для заполнения RAM-кэша в тренировочном цикле."""
+
+    def __init__(self, ds: Dataset):
+        self.ds = ds
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, i: int):
+        return (*self.ds[i], i)
 
 
 class BlockShuffleSampler(torch.utils.data.Sampler):
