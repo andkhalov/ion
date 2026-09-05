@@ -17,7 +17,8 @@ IO-предел (замер 2026-09-05: корпус 33+ ГБ на диске QE
 идёт в 5 раз меньше байт, чем float32/int64; в тренировочном цикле на GPU:
 `x = x.to(dev).float().div_(255)`, `y = y.to(dev).long()` — замер E0 2026-09-04, 4 CPU):
   VerticalDataset  — (RSF|SBF)+SAO → X uint8 [2,128,128] (амплитуда над медианой+6 дБ,
-                     0..24 дБ → 0..255), Y int8 [128,128] (BG/F2/F1/E/Es из полилиний ARTIST).
+                     0..24 дБ → 0..255), Y int8 [128,128] (BG/F2/F1/E/Es из полилиний ARTIST),
+                     P float32 [128] — профиль NHPC fp(h) на h_axis (NaN вне нижней стороны).
   ObliqueDataset   — SAO → синтетическая НЗ-маска int8 [128,128] (классы OB_CLASSES)
                      сферическим секансом; дальность D — случайная из d_set на каждый
                      показ (fixed_d — для валидации); component: "O" | "X".
@@ -58,15 +59,19 @@ class VerticalDataset(Dataset):
         return len(self.paths)
 
     def __getitem__(self, i: int):
+        """→ (X uint8 [2,NH,NF], Y int8 [NH,NF], P float32 [NH] — fp(h) профиля NHPC, NaN вне валидности)."""
         try:
             x = np.ascontiguousarray(dfm.read_canon(str(ROOT / self.paths[i])), dtype=np.uint8)
-            y = np.ascontiguousarray(canon.masks_from_sao(dfm.read_sao(str(ROOT / self.saos[i]))), dtype=np.int8)
+            sao = dfm.read_sao(str(ROOT / self.saos[i]))
+            y = np.ascontiguousarray(canon.masks_from_sao(sao), dtype=np.int8)
+            p = canon.profile_from_sao(sao)
         except Exception:
             # битый файл не должен ронять эпоху: отдаём пустой образец (фон),
             # доля таких — метрика санити E0 (логировать в TensorBoard)
             x = np.zeros((2, canon.NH, canon.NF), np.uint8)
             y = np.zeros((canon.NH, canon.NF), np.int8)
-        return torch.from_numpy(x), torch.from_numpy(y)
+            p = np.full(canon.NH, np.nan, np.float32)
+        return torch.from_numpy(x), torch.from_numpy(y), torch.from_numpy(p)
 
 
 class ObliqueDataset(Dataset):

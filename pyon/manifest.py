@@ -3,7 +3,9 @@
 manifest.py — опись корпуса: единственная «сборка» вместо тензорных кэшей (Э3 §2.1).
 
 По одной строке на пару (RSF|SBF, SAO): пути, станция, модель зонда, время (из имени
-файла), характеристики ARTIST (foF2, hF, foE, foEs, fxI, M3000F2), C-level, местное время
+файла), характеристики ARTIST (foF2, foF1, h′F, h′F2, foE, h′E, foEs, h′Es, fxI, fmin, hmF2, hmF1,
+zmE, yF2, B0, B1, M3000F2, MUF3000F2), гирочастота станции (`gyro`, SAO группа 1), число уровней
+профиля NHPC (`n_prof`), C-level, местное время
 (`lt_hour`, `daynight` по долготе станции), геомагнитная обстановка суток (GFZ: `Ap`, `Kp_max`,
 `F107` — data/geomag/Kp_ap_Ap_SN_F107_since_1932.txt, CC BY 4.0, Matzka et al. 2021,
 doi:10.5880/Kp.0001), флаги возмущённости: `disturbed_letters` (описательные буквы F/Q в SAO —
@@ -33,7 +35,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from pyon import digi_formats as dfm           # noqa: E402
 
-SCALED_KEYS = ["foF2", "foF1", "hF", "foE", "foEs", "fxI", "M3000F2", "fmin"]
+SCALED_KEYS = ["foF2", "foF1", "hF", "hF2", "foE", "hE", "foEs", "hEs", "fxI", "fmin", "hmF2", "hmF1", "zmE",
+               "yF2", "B0", "B1", "M3000F2", "MUF3000F2"]
 _STEM_RE = re.compile(r"([A-Z0-9]{5})_(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})")
 # координаты станций корпуса (широта, долгота E) — для местного времени/день-ночь (Э3 §3.6)
 STATIONS = {"JI91J": (-12.0, 283.2), "RO041": (41.8, 12.5), "MO155": (55.5, 37.3), "JR055": (54.6, 13.4),
@@ -118,6 +121,9 @@ def _row(f: str):
             row[k] = round(v, 3) if np.isfinite(v) else np.nan
         af = sao.get("analysis_flags")
         row["c_level"] = int(af[9]) if af is not None and len(af) >= 10 else -1
+        g = sao.get("geophys_const")
+        row["gyro"] = round(float(g[0]), 3) if g is not None and len(g) and 0.5 < float(g[0]) < 2.0 else np.nan
+        row["n_prof"] = int(len(sao.get("profile_h", [])))
         row["model"] = str(sao.get("system_desc", ""))[:6].strip()          # 'DPS-4 '/'DPS-4D'
         letters = "".join(sao.get("desc_letters", []) or [])
         row["disturbed_letters"] = int(any(c in letters for c in "FQ"))     # spread-F метки (ARTIST-5)

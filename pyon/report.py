@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 COLS = ["val/IoU_F2", "val/IoU_F1", "val/IoU_E", "val/IoU_Es", "val/foF2_rmse", "val/foF2_med",
-        "val/foF2_rd_exact", "val/foF2_rd_doubt", "val/hF_rmse", "val/logic_total", "val/logic_P1",
+        "val/foF2_rd_exact", "val/foF2_rd_doubt", "val/fxI_rmse", "val/fmin_rmse", "val/hF_rmse", "val/hmF2_rmse",
+        "val/hmF2_med", "val/prof_rmse", "val/prof_valid_iou", "val/logic_total", "val/logic_P1",
         "val/logic_P2", "val/logic_P3", "val/logic_P4", "gate/violations", "gate/warnings", "val/CE"]
 
 

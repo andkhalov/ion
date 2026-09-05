@@ -98,6 +98,91 @@ class TBLog:
         self.w.add_figure(tag, fig, step)
         plt.close(fig)
 
+    # ---------------------------------------------------------------- панель «как у дигизонда»
+    def digisonde(self, tag: str, samples: list, step: int, extent=(1, 15, 80, 720), save: str | Path | None = None):
+        """Панели в стиле Ion2PNG (Э1 §I.8 L4; DIARY 2026-09-05): для каждого образца — эхо (O),
+        следы ARTIST (чёрные точки), контуры нашей маски, профиль fp(h): ARTIST чёрной линией,
+        наш — красной; слева таблица характеристик «ARTIST | наша | Δ».
+        samples: [dict(x=[2,H,W], y=[H,W], pm=[H,W], p_true=[H], p_pred=[H], p_valid=[H] bool,
+                      table=[(имя, artist, ours)], title=str)]."""
+        import matplotlib.patheffects as pe
+        K = len(samples)
+        fig, axes = plt.subplots(K, 2, figsize=(11, 3.4 * K), squeeze=False, constrained_layout=True,
+                                 gridspec_kw=dict(width_ratios=[1.0, 3.2]))
+        f0, f1, h0, h1 = extent
+        for r, s_ in enumerate(samples):
+            x = np.asarray(s_["x"], np.float32); x = x / 255.0 if x.max() > 1.5 else x
+            y, pm = np.asarray(s_["y"]), np.asarray(s_["pm"])
+            H, W = y.shape
+            fx = np.linspace(f0, f1, W); hy = np.linspace(h0, h1, H)
+            axt, ax = axes[r]
+            axt.axis("off")
+            lines = [f"{'':7s}{'ARTIST':>8s}{'наша':>8s}{'Δ':>7s}"]
+            for name, a, b in s_["table"]:
+                fa = "  N/A " if not np.isfinite(a) else f"{a:6.2f}"
+                fb = "  N/A " if not np.isfinite(b) else f"{b:6.2f}"
+                fd = "" if not (np.isfinite(a) and np.isfinite(b)) else f"{b - a:+6.2f}"
+                lines.append(f"{name:7s}{fa:>8s}{fb:>8s}{fd:>7s}")
+            axt.text(0, 1, "\n".join(lines), family="monospace", fontsize=7.5, va="top", ha="left",
+                     transform=axt.transAxes)
+            ax.imshow(x[0], origin="lower", cmap="Greys", aspect="auto", extent=extent, vmin=0, vmax=1, alpha=0.9)
+            for ci in range(1, len(MASK_COLORS) - 1):
+                if (y == ci).any():
+                    rr, cc = np.nonzero(y == ci)
+                    ax.plot(fx[cc], hy[rr], ".", ms=1.5, color="black", alpha=0.6)
+                if (pm == ci).any():
+                    ax.contour((pm == ci).astype(float), levels=[0.5], colors=[MASK_COLORS[ci]], linewidths=1.2,
+                               extent=extent, origin="lower")
+            pt, pp = np.asarray(s_["p_true"], float), np.asarray(s_["p_pred"], float)
+            okt = np.isfinite(pt)
+            if okt.any():
+                ax.plot(pt[okt], hy[okt], "-", color="black", lw=2.0, label="профиль ARTIST (NHPC)")
+            pv = np.asarray(s_.get("p_valid", np.isfinite(pp)), bool)
+            if pv.any():
+                ax.plot(pp[pv], hy[pv], "-", color="red", lw=1.6, label="профиль наш",
+                        path_effects=[pe.Stroke(linewidth=2.6, foreground="white"), pe.Normal()])
+            ax.set(xlim=(f0, f1), ylim=(h0, h1), xlabel="МГц", ylabel="км", title=s_.get("title", ""))
+            ax.tick_params(labelsize=7); ax.title.set_fontsize(8); ax.grid(alpha=.25)
+            if r == 0:
+                ax.legend(fontsize=7, loc="upper right")
+        if save:
+            fig.savefig(save, dpi=110)
+        self.w.add_figure(tag, fig, step)
+        plt.close(fig)
+
+    def tracks_grid(self, tag: str, hours, chars: dict, step: int, title: str = "", save: str | Path | None = None):
+        """Суточные треки нескольких характеристик + разброс (как figures/baseline_vs_artist_*.png):
+        chars = {имя: (artist[], ours[], единица)}; верх — ход по UT, низ — ours vs ARTIST c RMSE/bias."""
+        names = list(chars)
+        n = len(names)
+        fig, axes = plt.subplots(2, n, figsize=(3.6 * n, 6.2), squeeze=False, constrained_layout=True)
+        hours = np.asarray(hours, float)
+        for j, name in enumerate(names):
+            a, b, unit = chars[name]
+            a, b = np.asarray(a, float), np.asarray(b, float)
+            ax = axes[0, j]
+            ax.plot(hours, a, "o-", ms=2.5, lw=1, color="tab:blue", label="ARTIST (SAO)")
+            ax.plot(hours, b, "x--", ms=3, lw=1, color="tab:orange", label="наша модель")
+            ax.set(title=f"{name}", ylabel=unit, xlabel="UT, ч", xlim=(0, 24)); ax.grid(alpha=.3)
+            ax.tick_params(labelsize=7); ax.title.set_fontsize(9)
+            if j == 0:
+                ax.legend(fontsize=7)
+            ax = axes[1, j]
+            ok = np.isfinite(a) & np.isfinite(b)
+            if ok.sum() >= 2:
+                ax.scatter(a[ok], b[ok], s=10)
+                lim = [min(a[ok].min(), b[ok].min()), max(a[ok].max(), b[ok].max())]
+                ax.plot(lim, lim, "k:", lw=1)
+                rmse = float(np.sqrt(np.mean((a[ok] - b[ok]) ** 2))); bias = float(np.mean(b[ok] - a[ok]))
+                ax.set_title(f"n={int(ok.sum())} RMSE={rmse:.2f} {unit} bias={bias:+.2f}\n"
+                             f"ARTIST есть в {int(np.isfinite(a).sum())}, наша в {int(np.isfinite(b).sum())} из {len(a)}", fontsize=7.5)
+            ax.set(xlabel=f"ARTIST {name}", ylabel=f"наша {name}"); ax.grid(alpha=.3); ax.tick_params(labelsize=7)
+        fig.suptitle(title, fontsize=10)
+        if save:
+            fig.savefig(save, dpi=110)
+        self.w.add_figure(tag, fig, step)
+        plt.close(fig)
+
     # ---------------------------------------------------------------- гистограммы
     def hist(self, tag: str, values, step: int):
         v = np.asarray(values, float)

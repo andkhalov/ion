@@ -50,14 +50,37 @@ class Block(nn.Module):
         return self.n(x)
 
 
+class ProfileHead(nn.Module):
+    """Голова профиля Nₑ(h) (Э1 §I.8 L4; DIARY 2026-09-05): из полноразмерных признаков декодера
+    [B, C, H, W] → свёртка 3×3 → среднее и максимум по оси ЧАСТОТЫ → 1D-свёртки по оси ВЫСОТЫ →
+    два канала на каждую строку h: fp(h) в МГц (softplus ≥ 0) и логит валидности (нижняя сторона:
+    h_min профиля ≤ h ≤ hmF2). Цель — NHPC-профиль ARTIST (`canon.profile_from_sao`)."""
+
+    def __init__(self, cin: int, hidden: int = 32):
+        super().__init__()
+        self.reduce = nn.Sequential(nn.Conv2d(cin, hidden, 3, padding=1), nn.ReLU())
+        self.net = nn.Sequential(nn.Conv1d(2 * hidden, hidden, 5, padding=2), nn.ReLU(),
+                                 nn.Conv1d(hidden, hidden, 5, padding=2), nn.ReLU(),
+                                 nn.Conv1d(hidden, 2, 1))
+
+    def forward(self, feat):
+        z = self.reduce(feat)
+        z = torch.cat([z.mean(3), z.amax(3)], 1)          # [B, 2·hidden, H]
+        out = self.net(z)                                   # [B, 2, H]
+        return torch.stack([nn.functional.softplus(out[:, 0]), out[:, 1]], 1)
+
+
 class UNet(nn.Module):
-    """Компактный U-Net: энкодер base·2^k на k = 0..depth−1, decoder с ConvTranspose и skip."""
+    """Компактный U-Net: энкодер base·2^k на k = 0..depth−1, decoder с ConvTranspose и skip.
+    profile=True добавляет ProfileHead на признаках декодера: forward(x, profile=True) →
+    (logits [B, cout, H, W], prof [B, 2, H])."""
 
     def __init__(self, cin: int, cout: int, base: int = 16, depth: int = 3, norm: str = "batch",
-                 dropout: float = 0.0, skip: bool = True, coords: bool = False):
+                 dropout: float = 0.0, skip: bool = True, coords: bool = False, profile: bool = False):
         super().__init__()
         assert depth >= 2
         self.coords, self.skip, self.depth = coords, skip, depth
+        self.prof = ProfileHead(base) if profile else None
         cin += 2 if coords else 0
         widths = [base * 2 ** k for k in range(depth)]
         self.down = nn.ModuleList([Block(cin if k == 0 else widths[k - 1], widths[k], norm, dropout)
@@ -70,7 +93,7 @@ class UNet(nn.Module):
         self.head = nn.Conv2d(widths[0], cout, 1)
         self.pool = nn.MaxPool2d(2)
 
-    def forward(self, x):
+    def forward(self, x, profile: bool = False):
         if self.coords:
             B, _, H, W = x.shape
             hh = torch.linspace(0, 1, H, device=x.device).view(1, 1, H, 1).expand(B, 1, H, W)
@@ -85,7 +108,11 @@ class UNet(nn.Module):
             s = feats[-2 - j]
             y = up(y)
             y = dec(torch.cat([y, s], 1) if self.skip else y)
-        return self.head(y)
+        logits = self.head(y)
+        if profile:
+            assert self.prof is not None, "UNet создан без profile=True"
+            return logits, self.prof(y)
+        return logits
 
 
 def n_params(m: nn.Module) -> int:

@@ -94,14 +94,14 @@ def _worker_init():
 
 
 def _check(args):
-    scene_kind, pm, name = args
-    fn = vertical_scene if scene_kind == "vertical" else oblique_scene
-    r = vd.validate_scene(fn(pm, name), _VOCAB, verbose=False)
+    scene_kind, pm, name, gyro = args
+    scene = vertical_scene(pm, name, gyro if gyro else 1.3) if scene_kind == "vertical" else oblique_scene(pm, name)
+    r = vd.validate_scene(scene, _VOCAB, verbose=False)
     return bool(r["violations"]), bool(r["warnings"])
 
 
 def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g", procs: int = 1,
-              with_warnings: bool = False):
+              with_warnings: bool = False, gyros=None):
     """Доля масок, чья сцена даёт sh:Violation, и флаги по маскам (True = нарушение);
     with_warnings=True → (доля нарушений, доля предупреждений sh:Warning, флаги нарушений) —
     Э3 §3.3 требует долю предупреждений отдельно. procs > 1 — пул процессов (каждый грузит словарь
@@ -110,14 +110,16 @@ def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g", pr
     if not masks:
         return (float("nan"), float("nan"), []) if with_warnings else (float("nan"), [])
     kind = "vertical" if scene_fn is vertical_scene else "oblique"
+    gyros = list(gyros) if gyros is not None else [None] * len(masks)   # гирочастота станции для V4
+    jobs = [(kind, pm, f"{prefix}{k}", gyros[k]) for k, pm in enumerate(masks)]
     if procs > 1:
         from multiprocessing import get_context
         with get_context("fork").Pool(procs, initializer=_worker_init) as pool:
-            res = pool.map(_check, [(kind, pm, f"{prefix}{k}") for k, pm in enumerate(masks)], chunksize=4)
+            res = pool.map(_check, jobs, chunksize=4)
     else:
         global _VOCAB
         _VOCAB = vocab if vocab is not None else (_VOCAB or vd.load_vocabulary())
-        res = [_check((kind, pm, f"{prefix}{k}")) for k, pm in enumerate(masks)]
+        res = [_check(j) for j in jobs]
     viol = [v for v, _ in res]; warn = [w for _, w in res]
     if with_warnings:
         return sum(viol) / len(viol), sum(warn) / len(warn), viol

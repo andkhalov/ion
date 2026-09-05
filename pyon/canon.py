@@ -12,6 +12,12 @@ canon.py — каноническая решётка ВЗ-ионограммы, 
 (X-следы — кандидат v0.4 / E3b). Растеризация: точка полилинии → ближайшая ячейка,
 утолщение ±thick по высоте (прототип I.8.1: ±1 бин).
 
+Профиль NHPC как цель обучения (Э1 §I.8: L4 «профиль Nₑ(h)»; уровень ARTIST — «модельное
+представление ARTIST» включает и NHPC): `profile_from_sao` даёт плазменную частоту fp(h) на
+канонической решётке высот h_axis ТОЛЬКО для нижней стороны (h ≤ hmF2; выше — модельная
+верхняя часть NHPC, не измерение) — NaN вне [h_min профиля, hmF2]. Невязка предсказанного и
+ARTIST-профиля (RMSE по высотам, |ΔhmF2|, |ΔNmF2|) — метрика Э3 §3.2 (дополнение 2026-09-05).
+
 Жёсткие ридауты (детерминированный измеритель по маске):
   fmax_readout(pm, ci, axis)  — последняя частотная колонка с ≥ min_pixels пикселями класса:
                                foF2 для F2 на ВЗ (axis=f_axis); МПЧ моды на НЗ (axis=fob_axis)
@@ -70,3 +76,33 @@ def hmin_readout(pm: np.ndarray, ci: int, axis: np.ndarray = h_axis, pct: float 
     """Нижняя кромка класса ci: pct-й перцентиль строк, где класс присутствует."""
     rows = np.flatnonzero((pm == ci).any(1))
     return float(axis[int(np.percentile(rows, pct))]) if len(rows) else float("nan")
+
+
+def profile_from_sao(sao: dict) -> np.ndarray:
+    """NHPC-профиль SAO (группы 51–52: истинная высота, плазменная частота) → fp(h) [NH] float32
+    на h_axis, только нижняя сторона (h ≤ hmF2 из scaled; если hmF2 нет — до максимума fp);
+    NaN вне диапазона профиля. Интерполяция линейная по высоте."""
+    h, fp = np.asarray(sao.get("profile_h", []), float), np.asarray(sao.get("profile_fp", []), float)
+    out = np.full(NH, np.nan, np.float32)
+    ok = np.isfinite(h) & np.isfinite(fp)
+    h, fp = h[ok], fp[ok]
+    if len(h) < 3:
+        return out
+    order = np.argsort(h, kind="stable"); h, fp = h[order], fp[order]
+    sc = sao.get("scaled")
+    hm = float(sc.get("hmF2", np.nan)) if sc is not None else np.nan
+    if not np.isfinite(hm):
+        hm = float(h[np.argmax(fp)])
+    keep = h <= hm + 1e-6
+    h, fp = h[keep], fp[keep]
+    if len(h) < 3:
+        return out
+    inside = (h_axis >= h[0]) & (h_axis <= h[-1])
+    out[inside] = np.interp(h_axis[inside], h, fp).astype(np.float32)
+    return out
+
+
+def gyro_from_sao(sao: dict, default: float = 1.3) -> float:
+    """Гирочастота станции (МГц) из группы 1 SAO (geophys_const[0]); default при отсутствии."""
+    g = np.asarray(sao.get("geophys_const", []), float)
+    return float(g[0]) if len(g) and np.isfinite(g[0]) and 0.5 < g[0] < 2.0 else default

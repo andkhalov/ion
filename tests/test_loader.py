@@ -51,9 +51,11 @@ def test_stem_time():
 
 def test_vertical_dataset_item(df_manifest):
     ds = loader.VerticalDataset(df_manifest)
-    x, y = ds[0]
+    x, y, p = ds[0]
     assert x.shape == (2, canon.NH, canon.NF) and x.dtype == torch.uint8 and int(x.max()) > 0
     assert y.shape == (canon.NH, canon.NF) and y.dtype == torch.int8
+    assert p.shape == (canon.NH,) and p.dtype == torch.float32 and torch.isfinite(p).sum() > 10
+    assert float(torch.nanmean(p)) > 0 and float(p[torch.isfinite(p)].max()) <= 15
     assert set(torch.unique(y).tolist()) <= set(range(len(canon.CLASSES)))
     assert len(ds) == len(df_manifest)
 
@@ -70,8 +72,8 @@ def test_oblique_dataset_item(df_manifest):
 
 def test_dataloader_batches_with_workers(df_manifest):
     dl = DataLoader(loader.VerticalDataset(df_manifest), batch_size=8, num_workers=2)
-    x, y = next(iter(dl))
-    assert x.shape == (8, 2, canon.NH, canon.NF) and y.shape == (8, canon.NH, canon.NF)
+    x, y, p = next(iter(dl))
+    assert x.shape == (8, 2, canon.NH, canon.NF) and y.shape == (8, canon.NH, canon.NF) and p.shape == (8, canon.NH)
     xf = x.float().div_(255)                                           # конвертация как в тренировочном цикле
     assert 0.0 <= float(xf.min()) and float(xf.max()) <= 1.0
 
@@ -80,8 +82,8 @@ def test_broken_file_yields_background(tmp_path, df_manifest):
     df = df_manifest.head(1).copy()
     bad = tmp_path / "bad.RSF"; bad.write_bytes(b"\x00" * 100)
     df.loc[df.index[0], "path"] = str(bad)
-    x, y = loader.VerticalDataset(df)[0]
-    assert int(x.max()) == 0 and int(y.max()) == 0
+    x, y, p = loader.VerticalDataset(df)[0]
+    assert int(x.max()) == 0 and int(y.max()) == 0 and torch.isnan(p).all()
 
 
 def test_block_shuffle_sampler_is_permutation():
