@@ -87,6 +87,7 @@ class TrainConfig:
     dropout: float = 0.0
     skip: bool = True
     best_metric: str = "val/foF2_med"   # критерий лучшей эпохи (меньше — лучше); weights.pt = лучшая
+    sched: str = "const"            # const | cosine (CosineAnnealingLR по эпохам до lr/100; NOIRE-Net: 1e-3→1e-5)
     dry: bool = False
     device: str = "cuda"
 
@@ -290,11 +291,13 @@ def evaluate(net, X, Y, meta, dev, cfg: TrainConfig, vocab, epoch: int, log: tbl
     n_g = min(cfg.gate_n, len(pm))
     if n_g and (epoch % cfg.gate_every == 0 or epoch == cfg.epochs - 1):
         t_g = time.time()
-        rate, _ = gates.gate_rate(pm[:n_g], gates.vertical_scene, vocab, prefix=f"e{epoch}_", procs=cfg.gate_procs)
-        m["gate/violations"] = rate
+        rate, warn, _ = gates.gate_rate(pm[:n_g], gates.vertical_scene, vocab, prefix=f"e{epoch}_",
+                                        procs=cfg.gate_procs, with_warnings=True)
+        m["gate/violations"], m["gate/warnings"] = rate, warn
         if "artist" not in artist_gate:
-            artist_gate["artist"], _ = gates.gate_rate(Yn[:n_g], gates.vertical_scene, vocab, prefix="art_", procs=cfg.gate_procs)
-        m["gate/artist_violations"] = artist_gate["artist"]
+            artist_gate["artist"], artist_gate["artist_w"], _ = gates.gate_rate(
+                Yn[:n_g], gates.vertical_scene, vocab, prefix="art_", procs=cfg.gate_procs, with_warnings=True)
+        m["gate/artist_violations"], m["gate/artist_warnings"] = artist_gate["artist"], artist_gate["artist_w"]
         m["gate/n"] = n_g
         m["time/gate_s"] = time.time() - t_g
     rt.insert(0, "logic_total", tot)
@@ -348,6 +351,8 @@ def train(cfg: TrainConfig) -> dict:
     net = UNet(2, len(canon.CLASSES), base=cfg.base, depth=cfg.depth, norm=cfg.norm, dropout=cfg.dropout,
                skip=cfg.skip, coords=v["coords"]).to(dev)
     opt = torch.optim.Adam(net.parameters(), cfg.lr)
+    sched = (torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, cfg.epochs), eta_min=cfg.lr / 100)
+             if cfg.sched == "cosine" else None)
     scaler = torch.amp.GradScaler(enabled=(cfg.amp and dev.type == "cuda"))
     ce = nn.CrossEntropyLoss(weight=torch.tensor(CE_WEIGHTS, device=dev))
     vocab = vd.load_vocabulary()
@@ -384,7 +389,10 @@ def train(cfg: TrainConfig) -> dict:
                       f"CE {loss_ce.item():.3f} loss {loss.item():.3f}", flush=True)
         t_train = time.time() - t_ep
         m = {"train/CE": sums["CE"] / max(n_seen, 1), "time/train_s": t_train,
-             "time/train_samples_per_s": n_seen / max(t_train, 1e-9), "epoch": ep}
+             "time/train_samples_per_s": n_seen / max(t_train, 1e-9), "epoch": ep,
+             "train/lr": opt.param_groups[0]["lr"]}
+        if sched is not None:
+            sched.step()
         if v["logic"]:
             m["train/logic"] = sums["logic"] / max(n_seen, 1)
             m.update({f"train/logic_{k}": s_ / max(n_seen, 1) for k, s_ in csum.items()})
@@ -452,6 +460,14 @@ def train(cfg: TrainConfig) -> dict:
                "best_epoch": best["epoch"], "best_metric": cfg.best_metric, "best_value": best["value"],
                "best": (hist[best["epoch"]] if best["epoch"] >= 0 else {}), "last": last_m}
     (rundir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float), encoding="utf-8")
+    # HParams-таблица TensorBoard: сравнение ранов по архитектуре/варианту (лучшая эпоха)
+    hp = {k: asdict(cfg)[k] for k in ("variant", "depth", "base", "norm", "dropout", "skip", "lam", "lr", "sched", "batch", "seed", "epochs")}
+    hm = {f"hparam/{k.split('/')[-1]}": float(summary["best"].get(k, np.nan)) for k in
+          ("val/IoU_F2", "val/foF2_med", "val/foF2_rmse", "val/logic_total", "gate/violations") if k in summary["best"]}
+    try:
+        log.w.add_hparams(hp, hm, run_name=".")
+    except Exception as e:                       # hparams — удобство, не артефакт
+        print("  hparams не записаны:", e, flush=True)
     log.close()
     print(f"[{cfg.stage}/{cfg.run}] готово за {time.time() - t_all:.0f} с → {rundir}", flush=True)
     return summary

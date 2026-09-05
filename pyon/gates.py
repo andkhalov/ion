@@ -96,23 +96,29 @@ def _worker_init():
 def _check(args):
     scene_kind, pm, name = args
     fn = vertical_scene if scene_kind == "vertical" else oblique_scene
-    return bool(vd.validate_scene(fn(pm, name), _VOCAB, verbose=False)["violations"])
+    r = vd.validate_scene(fn(pm, name), _VOCAB, verbose=False)
+    return bool(r["violations"]), bool(r["warnings"])
 
 
-def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g", procs: int = 1):
-    """Доля масок, чья сцена даёт sh:Violation, и флаги по маскам (True = нарушение).
-    procs > 1 — пул процессов (каждый грузит словарь один раз): ~1.5 с/сцену на ядро
-    (owlrl-замыкание + 3 прогона pyshacl), на 4 ядрах ×3.5 (замер 2026-09-04)."""
+def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g", procs: int = 1,
+              with_warnings: bool = False):
+    """Доля масок, чья сцена даёт sh:Violation, и флаги по маскам (True = нарушение);
+    with_warnings=True → (доля нарушений, доля предупреждений sh:Warning, флаги нарушений) —
+    Э3 §3.3 требует долю предупреждений отдельно. procs > 1 — пул процессов (каждый грузит словарь
+    один раз): ~1.4 с/сцену на ядро (owlrl-замыкание + 3 прогона pyshacl), на 4 ядрах ×2.3."""
     masks = list(masks)
     if not masks:
-        return float("nan"), []
+        return (float("nan"), float("nan"), []) if with_warnings else (float("nan"), [])
+    kind = "vertical" if scene_fn is vertical_scene else "oblique"
     if procs > 1:
         from multiprocessing import get_context
-        kind = "vertical" if scene_fn is vertical_scene else "oblique"
         with get_context("fork").Pool(procs, initializer=_worker_init) as pool:
-            flags = pool.map(_check, [(kind, pm, f"{prefix}{k}") for k, pm in enumerate(masks)], chunksize=4)
+            res = pool.map(_check, [(kind, pm, f"{prefix}{k}") for k, pm in enumerate(masks)], chunksize=4)
     else:
-        vocab = vocab if vocab is not None else vd.load_vocabulary()
-        flags = [bool(vd.validate_scene(scene_fn(pm, f"{prefix}{k}"), vocab, verbose=False)["violations"])
-                 for k, pm in enumerate(masks)]
-    return sum(flags) / len(flags), flags
+        global _VOCAB
+        _VOCAB = vocab if vocab is not None else (_VOCAB or vd.load_vocabulary())
+        res = [_check((kind, pm, f"{prefix}{k}")) for k, pm in enumerate(masks)]
+    viol = [v for v, _ in res]; warn = [w for _, w in res]
+    if with_warnings:
+        return sum(viol) / len(viol), sum(warn) / len(warn), viol
+    return sum(viol) / len(viol), viol

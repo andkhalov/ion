@@ -52,6 +52,8 @@ def test_gate_rate(vocab, sao_ji):
     masks = [obs.oblique_masks_from_sao(sao_ji, d, "O")[0] for d in obs.D_SET]
     rate, flags = gates.gate_rate(masks, gates.oblique_scene, vocab, prefix="r")
     assert rate == 0.0 and flags == [False] * len(masks)
+    rate2, warn, flags2 = gates.gate_rate(masks, gates.oblique_scene, vocab, prefix="w", with_warnings=True)
+    assert rate2 == 0.0 and 0.0 <= warn <= 1.0 and flags2 == flags
     assert np.isnan(gates.gate_rate([], gates.oblique_scene, vocab)[0])
 
 
