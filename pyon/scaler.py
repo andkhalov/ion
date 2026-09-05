@@ -72,8 +72,9 @@ def profile_peaks(fp: np.ndarray, h_axis=canon.h_axis):
 
 
 def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 1.3,
-                   distances=MUF_DISTANCES, k_muf: float = K_MUF) -> dict:
-    """Маска [NH, NF] классов canon.CLASSES (+ профиль fp(h) [NH], NaN вне валидности) → таблица."""
+                   distances=MUF_DISTANCES, k_muf: float = K_MUF, hm_f2: float = float("nan")) -> dict:
+    """Маска [NH, NF] классов canon.CLASSES (+ профиль fp(h) [NH], NaN вне валидности; + hmF2 прямой
+    регрессии головы, если есть — тогда hmF2 берётся из него, а не из пика профиля) → таблица."""
     C = canon.CLASSES.index
     r = {}
     for cls in ("F2", "F1", "E", "Es"):
@@ -106,7 +107,7 @@ def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 
         r["M3000F2"] = float("nan")
     if prof is not None:
         pk = profile_peaks(np.asarray(prof, float))
-        r["hmF2"] = pk["hmF2"]; r["NmF2_fp"] = pk["fpmax"]
+        r["hmF2"] = float(hm_f2) if np.isfinite(hm_f2) else pk["hmF2"]; r["NmF2_fp"] = pk["fpmax"]
         lower = [h for h, v in pk["peaks"]]
         r["hmF1"] = float(lower[-1]) if len(lower) >= 1 and np.isfinite(r["foF1"]) else float("nan")
         r["hmE"] = float(lower[0]) if len(lower) >= 1 and np.isfinite(r["foE"]) else float("nan")

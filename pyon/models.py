@@ -53,8 +53,11 @@ class Block(nn.Module):
 class ProfileHead(nn.Module):
     """Голова профиля Nₑ(h) (Э1 §I.8 L4; DIARY 2026-09-05): из полноразмерных признаков декодера
     [B, C, H, W] → свёртка 3×3 → среднее и максимум по оси ЧАСТОТЫ → 1D-свёртки по оси ВЫСОТЫ →
-    два канала на каждую строку h: fp(h) в МГц (softplus ≥ 0) и логит валидности (нижняя сторона:
-    h_min профиля ≤ h ≤ hmF2). Цель — NHPC-профиль ARTIST (`canon.profile_from_sao`)."""
+    три канала на каждую строку h: fp(h) в МГц (softplus ≥ 0), логит валидности (нижняя сторона:
+    h_min профиля ≤ h ≤ hmF2) и **hmF2 прямой регрессией** — доля решётки высот в (0, 1), одна на
+    образец, размноженная по h (prefull 2026-09-05: верх валидности по порогу 0.5 систематически
+    недотягивал 16 км до hmF2 ARTIST, мягкие ридауты не помогали → прямая супервизия).
+    Цель — NHPC-профиль ARTIST (`canon.profile_from_sao`)."""
 
     def __init__(self, cin: int, hidden: int = 32):
         super().__init__()
@@ -62,18 +65,20 @@ class ProfileHead(nn.Module):
         self.net = nn.Sequential(nn.Conv1d(2 * hidden, hidden, 5, padding=2), nn.ReLU(),
                                  nn.Conv1d(hidden, hidden, 5, padding=2), nn.ReLU(),
                                  nn.Conv1d(hidden, 2, 1))
+        self.hm = nn.Linear(2 * hidden, 1)
 
     def forward(self, feat):
         z = self.reduce(feat)
         z = torch.cat([z.mean(3), z.amax(3)], 1)          # [B, 2·hidden, H]
         out = self.net(z)                                   # [B, 2, H]
-        return torch.stack([nn.functional.softplus(out[:, 0]), out[:, 1]], 1)
+        hm = torch.sigmoid(self.hm(z.mean(2)))              # [B, 1] — hmF2 в долях решётки
+        return torch.stack([nn.functional.softplus(out[:, 0]), out[:, 1], hm.expand(-1, out.shape[2])], 1)
 
 
 class UNet(nn.Module):
     """Компактный U-Net: энкодер base·2^k на k = 0..depth−1, decoder с ConvTranspose и skip.
     profile=True добавляет ProfileHead на признаках декодера: forward(x, profile=True) →
-    (logits [B, cout, H, W], prof [B, 2, H])."""
+    (logits [B, cout, H, W], prof [B, 3, H]: fp, логит валидности, hmF2-доля)."""
 
     def __init__(self, cin: int, cout: int, base: int = 16, depth: int = 3, norm: str = "batch",
                  dropout: float = 0.0, skip: bool = True, coords: bool = False, profile: bool = False):

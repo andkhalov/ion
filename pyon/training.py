@@ -262,16 +262,16 @@ def strata(meta: pd.DataFrame) -> dict:
 
 @torch.no_grad()
 def predict(net, X: torch.Tensor, dev, batch: int = 128, profile: bool = False):
-    """→ argmax-маски [N,H,W] int8, hinge-L_logic по компонентам [N], профиль [N,2,H] (fp, p_valid) или None."""
+    """→ argmax-маски [N,H,W] int8, hinge-L_logic по компонентам [N], профиль [N,3,H] (fp, p_valid, hmF2-доля) или None."""
     net.eval()
     pms, comps, profs = [], {}, []
     if not len(X):
-        return np.zeros((0, canon.NH, canon.NF), np.int8), {}, (np.zeros((0, 2, canon.NH), np.float32) if profile else None)
+        return np.zeros((0, canon.NH, canon.NF), np.int8), {}, (np.zeros((0, 3, canon.NH), np.float32) if profile else None)
     for k in range(0, len(X), batch):
         xb = to_input(X[k:k + batch], dev)
         if profile:
             lg, pr = net(xb, profile=True)
-            profs.append(torch.stack([pr[:, 0], torch.sigmoid(pr[:, 1])], 1).float().cpu())
+            profs.append(torch.stack([pr[:, 0], torch.sigmoid(pr[:, 1]), pr[:, 2]], 1).float().cpu())
         else:
             lg = net(xb)
         lg = lg.float()
@@ -282,6 +282,13 @@ def predict(net, X: torch.Tensor, dev, batch: int = 128, profile: bool = False):
     pm = torch.cat(pms).numpy()
     comps = {k: torch.cat(v).numpy() for k, v in comps.items()}
     return pm, comps, (torch.cat(profs).numpy() if profile else None)
+
+
+def hm_of(prof: np.ndarray | None, k: int) -> float:
+    """hmF2 (км) из канала прямой регрессии головы профиля; NaN, если профиля нет."""
+    if prof is None or prof.shape[1] < 3:
+        return float("nan")
+    return float(canon.H_MIN + prof[k, 2, 0] * (canon.H_MAX - canon.H_MIN))
 
 
 def masked_profile(prof: np.ndarray | None, k: int):
@@ -321,7 +328,7 @@ def char_table(pm: np.ndarray, prof: np.ndarray | None, meta: pd.DataFrame) -> p
     gy = gyros_of(meta)
     rows = []
     for k in range(len(pm)):
-        r = scaler.scale_vertical(pm[k], masked_profile(prof, k), f_b=float(gy[k]))
+        r = scaler.scale_vertical(pm[k], masked_profile(prof, k), f_b=float(gy[k]), hm_f2=hm_of(prof, k))
         out = {f"{n}_pred": r.get(n, np.nan) for n in CHAR_STATS + ["M3000F2", "hmF1", "hmE"]}
         for n in CHAR_STATS + ["M3000F2"]:
             key = scaler.ARTIST_KEYS.get(n, n)
@@ -397,7 +404,7 @@ def digisonde_samples(X, Y, P, pm, prof, rows: pd.DataFrame, titles, idx) -> lis
     out = []
     for i in idx:
         pp = masked_profile(prof, i) if prof is not None else np.full(canon.NH, np.nan)
-        ours = scaler.scale_vertical(pm[i], pp, f_b=float(gy[i]))
+        ours = scaler.scale_vertical(pm[i], pp, f_b=float(gy[i]), hm_f2=hm_of(prof, i))
         table = []
         for name in scaler.REPORT_ROWS:
             key = scaler.ARTIST_KEYS.get(name, name)
@@ -488,6 +495,8 @@ def train(cfg: TrainConfig) -> dict:
     scaler_amp = torch.amp.GradScaler(enabled=(cfg.amp and dev.type == "cuda"))
     ce = nn.CrossEntropyLoss(weight=torch.tensor(CE_WEIGHTS, device=dev))
     bce = nn.BCEWithLogitsLoss()
+    h_frac = torch.linspace(0, 1, canon.NH, device=dev)           # доля решётки высот для регрессии hmF2
+    H_SPAN100 = (canon.H_MAX - canon.H_MIN) / 100.0
     vocab = vd.load_vocabulary()
     artist_gate: dict = {}
     best = dict(value=float("inf"), epoch=-1)
@@ -529,7 +538,10 @@ def train(cfg: TrainConfig) -> dict:
             if cfg.profile:
                 pr = pr.float(); valid = torch.isfinite(p)
                 l1 = (pr[:, 0] - torch.nan_to_num(p)).abs()[valid].mean() if valid.any() else lg.sum() * 0
-                l_prof = l1 + 0.2 * bce(pr[:, 1], valid.float())
+                has = valid.any(1)                                            # hmF2 = верх валидного профиля
+                hm_t = (valid.float() * h_frac).amax(1)
+                l_hm = (pr[:, 2, 0] - hm_t).abs()[has].mean() * H_SPAN100 if has.any() else lg.sum() * 0
+                l_prof = l1 + 0.2 * bce(pr[:, 1], valid.float()) + l_hm                # l_hm — в сотнях км
                 loss = loss + cfg.lam_prof * l_prof
                 sums["prof"] += l_prof.item() * len(x)
             opt.zero_grad(set_to_none=True)

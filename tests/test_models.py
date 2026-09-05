@@ -36,8 +36,10 @@ def test_profile_head():
     m = UNet(2, 5, profile=True)
     x = torch.rand(3, 2, 128, 128)
     logits, prof = m(x, profile=True)
-    assert logits.shape == (3, 5, 128, 128) and prof.shape == (3, 2, 128)
+    assert logits.shape == (3, 5, 128, 128) and prof.shape == (3, 3, 128)
     assert (prof[:, 0] >= 0).all()                     # fp ≥ 0 (softplus)
+    hm = prof[:, 2]                                    # hmF2-доля: в (0,1), константа по h
+    assert (hm > 0).all() and (hm < 1).all() and torch.allclose(hm, hm[:, :1].expand_as(hm))
     assert m(x).shape == (3, 5, 128, 128)              # без профиля — как раньше
 
 
