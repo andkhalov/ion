@@ -88,9 +88,10 @@ def main():
     rate, warn, flags, det = gates.gate_rate(pm, gates.vertical_scene, vocab, prefix="m_", procs=a.procs, with_warnings=True, gyros=gy, with_details=True)
     rate_a, warn_a, flags_a, det_a = gates.gate_rate(Y.numpy(), gates.vertical_scene, vocab, prefix="a_", procs=a.procs, with_warnings=True, gyros=gy, with_details=True)
     print(f"  гейт {len(sel)}×2 сцен за {time.time() - t1:.0f} с: модель {rate:.1%} (предупр. {warn:.1%}), ARTIST {rate_a:.1%} ({warn_a:.1%})", flush=True)
+    sid = lambda msg: str(msg).split(":")[0].strip()          # «Q1: …», «S4: …» → идентификатор формы (без URI образца)
     sel = sel.copy()
     sel["viol"] = np.array(flags, bool); sel["viol_artist"] = np.array(flags_a, bool)
-    sel["shapes"] = ["|".join(d) for d in det]; sel["shapes_artist"] = ["|".join(d) for d in det_a]
+    sel["shapes"] = ["|".join(sorted(set(sid(x) for x in d))) for d in det]; sel["shapes_artist"] = ["|".join(sorted(set(sid(x) for x in d))) for d in det_a]
     sel["logic_total"] = sum(comps.values()) if comps else np.nan
     sel["dfoF2"] = (ct.foF2_pred - ct.foF2_artist).values; sel["foF2_pred"] = ct.foF2_pred.values
     sel["gross"] = gross(sel.dfoF2.values, sel.foF2.astype(float).values)
@@ -112,9 +113,12 @@ def main():
         for st, gs in g.groupby("station"):
             m[f"{grp}/station_{st}/viol"] = float(gs.viol.mean()); m[f"{grp}/station_{st}/viol_artist"] = float(gs.viol_artist.mean())
             m[f"{grp}/station_{st}/foF2_med"] = float(np.nanmedian(np.abs(gs.dfoF2)))
-    shapes = collections.Counter(s for d in det for s in d); shapes_a = collections.Counter(s for d in det_a for s in d)
+    shapes = collections.Counter(sid(s) for d in det for s in d); shapes_a = collections.Counter(sid(s) for d in det_a for s in d)
     pd.DataFrame([dict(shape=k, model=shapes.get(k, 0), artist=shapes_a.get(k, 0)) for k in sorted(set(shapes) | set(shapes_a))]).to_csv(rundir / "shapes.csv", index=False)
-    sel.drop(columns=[c_ for c_ in sel.columns if c_ in ("path", "sao")]).to_csv(rundir / "samples.csv", index=False)
+    for col in ct.columns:                                        # полная таблица характеристик (для пост-анализа: h′F, F1 …)
+        if col not in sel.columns:
+            sel[col] = ct[col].values
+    sel.to_csv(rundir / "samples.csv", index=False)
     # гистограммы |ΔfoF2| для отбракованных/принятых по группам
     import matplotlib
     matplotlib.use("Agg"); import matplotlib.pyplot as plt
