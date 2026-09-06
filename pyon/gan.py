@@ -91,7 +91,7 @@ class Generator(nn.Module):
                                           nn.Conv2d(c, c, 3, padding=1), _gn(c), nn.LeakyReLU(0.2)))
             cin = c
         self.dec = nn.ModuleList([DecBlock(widths[k], widths[k - 1], widths[k - 1], wdim) for k in range(depth - 1, 0, -1)])
-        self.head = nn.Conv2d(widths[0], 2, 1)
+        self.head = nn.Conv2d(widths[0], 4, 1)        # на поляризацию: логит активности, логит амплитуды
 
     def make_input(self, mask: torch.Tensor) -> torch.Tensor:
         B, H, W = mask.shape; dev = mask.device
@@ -111,7 +111,16 @@ class Generator(nn.Module):
         y = skips[-1]
         for j, blk in enumerate(self.dec):
             y = blk(y, skips[-2 - j], w)
-        return Fn.relu(self.head(y)).clamp(max=1.0)
+        o = self.head(y)
+        # Сырьё разрежено (~85 % точных нулей после порога): выход = ворота активности × амплитуда.
+        # Ворота — Бернулли со straight-through (вперёд — жёсткий 0/1, назад — градиент через
+        # σ(логит)): точные нули как у реального, градиент не умирает (relu-выход выродился в нули,
+        # запуск 2026-09-06 13:00). Амплитуда — сигмоида.
+        logit, amp = o[:, 0::2], o[:, 1::2]
+        p = torch.sigmoid(logit)
+        hard = (torch.rand_like(p) < p).float()
+        gate = hard + p - p.detach()
+        return gate * torch.sigmoid(amp)
 
     @torch.no_grad()
     def sample(self, mask: torch.Tensor) -> torch.Tensor:
@@ -151,10 +160,11 @@ class GanConfig:
     d_base: int = 64
     lam_fm: float = 2.0
     lam_l1: float = 5.0
-    r1: float = 1.0
+    r1: float = 0.1                 # γ R1 (лениво раз в r1_every; эффективно γ·r1_every); 1.0 давил D в константу
     r1_every: int = 16
     ema: float = 0.999
     train_size: int = 60000
+    cache: str = "local/gan_cache.npz"   # декодированные пары (X uint8, Y int8) — чтобы перезапуски не парсили корпус
     val_size: int = 1024
     eval_every: int = 2000
     log_images: int = 16
@@ -181,7 +191,19 @@ def train_gan(cfg: GanConfig) -> dict:
     tr = tr_all.iloc[np.unique(np.linspace(0, len(tr_all) - 1, min(cfg.train_size, len(tr_all))).round().astype(int))].reset_index(drop=True)
     va = va_all.iloc[np.unique(np.linspace(0, len(va_all) - 1, min(cfg.val_size, len(va_all))).round().astype(int))].reset_index(drop=True)
     t0 = time.time()
-    Xt, Yt, _ = training.decode(tr, cfg.workers); Xv, Yv, _ = training.decode(va, cfg.workers)
+    cache = ROOT / cfg.cache if cfg.cache and not cfg.dry else None
+    if cache is not None and cache.exists():
+        z = np.load(cache)
+        if int(z["n_train"]) == len(tr) and int(z["n_val"]) == len(va) and str(z["manifest"]) == cfg.manifest:
+            Xt, Yt, Xv, Yv = (torch.from_numpy(z[k]) for k in ("Xt", "Yt", "Xv", "Yv"))
+            print(f"  кэш {cache}: train {len(Xt)} / val {len(Xv)} загружены за {time.time() - t0:.0f} с", flush=True)
+        else:
+            cache = None
+    if cache is None or not cache.exists():
+        Xt, Yt, _ = training.decode(tr, cfg.workers); Xv, Yv, _ = training.decode(va, cfg.workers)
+        if cache is not None:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(cache, Xt=Xt.numpy(), Yt=Yt.numpy(), Xv=Xv.numpy(), Yv=Yv.numpy(), n_train=len(tr), n_val=len(va), manifest=cfg.manifest)
     lset_path = ROOT / "runs" / "E1" / "logging_set.json"
     lset = training.select_logging_set(va_all, lset_path if lset_path.exists() else rundir / "logging_set.json")
     img_rows = df[df.path.isin([im["path"] for im in lset["images"]])].sort_values(["station", "time"]).head(cfg.log_images).reset_index(drop=True)
