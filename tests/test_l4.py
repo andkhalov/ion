@@ -68,3 +68,26 @@ def test_hF2_above_foF1():
     band("F1", 2.0, 4.0, 180); band("F2", 4.1, 7.0, 340); band("F2", 2.0, 2.3, 190)   # «F2» ниже каспа F1
     r = scaler.scale_vertical(y, None, f_b=1.3)
     assert abs(r["hF2"] - 340) < 6 and abs(r["hF"] - 180) < 6 and abs(r["foF1"] - 4.0) < 0.12
+
+
+def test_sim2real_helpers():
+    """Сим2реал (Э3 §3.4): кратники во входе рендерера, трансплантация фона, коррелированный спекл."""
+    from pyon import training as T
+    y = torch.zeros(2, canon.NH, canon.NF, dtype=torch.long); y[:, 40, 30:60] = 1; y[:, 10, 20:40] = 4
+    y2 = T.add_multiples(y, 1.0)
+    step = (canon.H_MAX - canon.H_MIN) / (canon.NH - 1); off = round(canon.H_MIN / step)
+    assert torch.equal(y2[:, 40], y[:, 40]) and (y2[:, 2 * 40 + off, 30:60] == 1).all() and (y2[:, 2 * 10 + off, 20:40] == 4).all()
+    assert torch.equal(T.add_multiples(y, 0.0), y)                                  # prob 0 — без изменений
+    x_real = torch.rand(2, 2, canon.NH, canon.NF); x_r = torch.ones(2, 2, canon.NH, canon.NF)
+    xo = T.transplant(x_real, x_r, y, "own", dilate=2)
+    assert (xo[:, :, 38:43, 30:60] == 1).all() and torch.equal(xo[:, :, 60:, :], x_real[:, :, 60:, :])   # внутри — рендер, снаружи — фон
+    xs = T.transplant(x_real, x_r, y, "shuffle", dilate=2)
+    assert (xs[:, :, 38:43, 30:60] == 1).all() and xs.shape == x_real.shape
+    net = renderer.Renderer(base=8, depth=2, hetero=True)
+    p = torch.full((8, canon.NH, canon.NF), 0.3)
+    for corr, want_corr in (((0, 0), False), ((9, 3), True)):
+        net.corr = corr; torch.manual_seed(0)
+        act = (net._uniform(p) < p).float()
+        assert abs(act.mean().item() - 0.3) < 0.01                                  # маргинал сохранён
+        lag = (act[:, 1:] * act[:, :-1]).mean().item() / act.mean().item() ** 2      # соседи по высоте
+        assert (lag > 1.5) == want_corr
