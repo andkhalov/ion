@@ -42,6 +42,12 @@ def stage_table(stage: str, which: str = "val/CE") -> pd.DataFrame:
         s = json.loads(sj.read_text(encoding="utf-8"))
         mcsv = sj.parent / "metrics.csv"
         m = pick_epoch(pd.read_csv(mcsv), which).to_dict() if mcsv.exists() else (s.get("last") or {})
+        if mcsv.exists():                                   # гейт считается не каждую эпоху — берём последний доступный
+            mm = pd.read_csv(mcsv)
+            for g in [c for c in mm.columns if c.startswith("gate/")]:
+                col = mm[g].dropna()
+                if len(col):
+                    m[g] = float(col.iloc[-1])
         cfg = json.loads((sj.parent / "config.json").read_text(encoding="utf-8")) if (sj.parent / "config.json").exists() else {}
         r = dict(run=s["run"], variant=s.get("variant"), params=s.get("params"), epoch=int(m.get("epoch", -1)),
                  depth=cfg.get("depth"), base=cfg.get("base"), norm=cfg.get("norm"), dropout=cfg.get("dropout"),

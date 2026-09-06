@@ -35,8 +35,9 @@ from pyon.models import UNet                                                    
 def load_net(weights: Path, dev):
     ck = torch.load(weights, map_location=dev)
     c = ck["cfg"]
+    coords = T.VARIANTS.get(c.get("variant", "baseline"), {}).get("coords", False)   # coords задаётся вариантом, не полем cfg
     net = UNet(2, len(canon.CLASSES), base=c["base"], depth=c["depth"], norm=c.get("norm", "batch"),
-               dropout=c.get("dropout", 0.0), skip=c.get("skip", True), coords=c.get("coords", False),
+               dropout=c.get("dropout", 0.0), skip=c.get("skip", True), coords=coords,
                profile=c.get("profile", False)).to(dev)
     net.load_state_dict(ck["state_dict"]); net.eval()
     return net, c
