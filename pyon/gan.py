@@ -300,6 +300,7 @@ def turing(log: tblog.TBLog, xr: np.ndarray, xf: np.ndarray, step: int, save: Pa
     import matplotlib
     matplotlib.use("Agg"); import matplotlib.pyplot as plt
     rng = np.random.default_rng(seed); n = min(8, len(xr))
+    xr = np.asarray(xr, np.float32); xr = xr / 255.0 if xr.max() > 1.5 else xr      # реальное — uint8 (ошибка 2026-09-06: плитки заливались)
     tiles = [("R", xr[i, 0]) for i in range(n)] + [("F", xf[i, 0]) for i in range(n)]
     order = rng.permutation(len(tiles))
     fig, ax = plt.subplots(4, 4, figsize=(10, 10))
