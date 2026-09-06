@@ -110,6 +110,8 @@ class TrainConfig:
                                     # "shuffle" (фон другого образца батча); "" — чистый рендер (Э3 §2 E4)
     bg_dilate: int = 2              # радиус расширения маски следов (px) — внутри рендер, снаружи реальный фон
     render_corr: str = "0,0"        # длина корреляции спекла рендерера при обучении "k_h,k_f" (0,0 — iid)
+    render_mult: float = 0.0        # вероятность добавить в ВХОД рендерера кратник 2F2/2Es (h′→2h′; метка без него —
+                                    # реальные ионограммы содержат неразмеченные кратники, сим2реал 2026-09-05)
 
 
 # ---------------------------------------------------------------------------- служебное
@@ -170,6 +172,26 @@ def decode(df: pd.DataFrame, workers: int, batch: int = 128):
 
 def to_input(x: torch.Tensor, dev) -> torch.Tensor:
     return x.to(dev, non_blocking=True).float().div_(255)
+
+
+@torch.no_grad()
+def add_multiples(y: torch.Tensor, prob: float) -> torch.Tensor:
+    """Маска [B,H,W] → маска для рендерера с кратником: пиксели F2/Es переносятся на удвоенную
+    действующую высоту (h′ = H_MIN + j·Δ → 2h′ ⇒ j₂ = 2j + H_MIN/Δ), класс тот же, поверх фона; у доли
+    prob образцов. Реальные ионограммы содержат 2F2/2Es без разметки ARTIST (Э2 §4-bis P3, класс MH НЗ)."""
+    if prob <= 0:
+        return y
+    B, H, W = y.shape
+    step = (canon.H_MAX - canon.H_MIN) / (canon.NH - 1)
+    off = int(round(canon.H_MIN / step))
+    y2 = y.clone()
+    take = torch.rand(B, device=y.device) < prob
+    src = torch.isin(y, torch.tensor([canon.CLASSES.index("F2"), canon.CLASSES.index("Es")], device=y.device)) & take.view(B, 1, 1)
+    b, j, k = torch.nonzero(src, as_tuple=True)
+    j2 = 2 * j + off
+    ok = j2 < H
+    y2[b[ok], j2[ok], k[ok]] = torch.where(y2[b[ok], j2[ok], k[ok]] == 0, y[b[ok], j[ok], k[ok]], y2[b[ok], j2[ok], k[ok]])
+    return y2
 
 
 @torch.no_grad()
@@ -564,7 +586,7 @@ def train(cfg: TrainConfig) -> dict:
             x, y, p = to_input(x, dev), y.to(dev, non_blocking=True).long(), p.to(dev, non_blocking=True)
             if ren_t is not None:
                 with torch.no_grad():
-                    x_r = ren_t.sample(y)                             # новая реализация спекла на каждый показ
+                    x_r = ren_t.sample(add_multiples(y, cfg.render_mult))   # новая реализация спекла на каждый показ
                     x = transplant(x, x_r, y, cfg.bg_mode, cfg.bg_dilate) if cfg.bg_mode else x_r
             with torch.autocast("cuda", enabled=scaler_amp.is_enabled()):
                 if cfg.profile:
@@ -665,7 +687,7 @@ def train(cfg: TrainConfig) -> dict:
                "best": (hist[best["epoch"]] if best["epoch"] >= 0 else {}), "last": last_m}
     (rundir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float), encoding="utf-8")
     hp = {k: asdict(cfg)[k] for k in ("variant", "depth", "base", "norm", "dropout", "skip", "profile", "lam", "lam_prof",
-                                      "lr", "sched", "batch", "seed", "epochs", "render_train", "render_val", "bg_mode", "render_corr")}
+                                      "lr", "sched", "batch", "seed", "epochs", "render_train", "render_val", "bg_mode", "render_corr", "render_mult")}
     hm = {f"hparam/{k.split('/')[-1]}": float(summary["best"].get(k, np.nan)) for k in
           ("val/IoU_F2", "val/foF2_med", "val/foF2_rmse", "val/hmF2_rmse", "val/prof_rmse", "val/logic_total", "gate/violations")
           if k in summary["best"]}
