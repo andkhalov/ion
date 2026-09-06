@@ -104,6 +104,8 @@ class TrainConfig:
     best_metric: str = "val/foF2_med"
     dry: bool = False
     device: str = "cuda"
+    render_train: str = ""          # сим2реал (Э3 §3.4): веса рендерера → входы ОБУЧЕНИЯ рендерятся из масок каждый батч
+    render_val: str = ""            # веса рендерера → val/панели/треки оцениваются на РЕНДЕРЕ (клетки «→рендер»)
 
 
 # ---------------------------------------------------------------------------- служебное
@@ -164,6 +166,14 @@ def decode(df: pd.DataFrame, workers: int, batch: int = 128):
 
 def to_input(x: torch.Tensor, dev) -> torch.Tensor:
     return x.to(dev, non_blocking=True).float().div_(255)
+
+
+@torch.no_grad()
+def render_uint8(ren, Y: torch.Tensor, dev, seed: int = 0, batch: int = 128) -> torch.Tensor:
+    """Маски [N,H,W] → рендер [N,2,H,W] uint8 0..255 (как сырьё лоадера); детерминизм — по seed."""
+    torch.manual_seed(seed)
+    out = [(ren.sample(Y[k:k + batch].to(dev).long()) * 255).round().to(torch.uint8).cpu() for k in range(0, len(Y), batch)]
+    return torch.cat(out) if out else torch.zeros((0, 2, canon.NH, canon.NF), dtype=torch.uint8)
 
 
 def gyros_of(df: pd.DataFrame) -> np.ndarray:
@@ -469,12 +479,20 @@ def train(cfg: TrainConfig) -> dict:
     print(f"  RAM-кэш train: {'ВКЛ' if use_cache else 'выкл'} ({len(tr) * per_sample / 2**30:.1f} ГБ нужно, лимит {cfg.cache_gb} ГБ)", flush=True)
     t0 = time.time()
     Xv, Yv, Pv = decode(va, cfg.workers)
+    from pyon import renderer as rnd                                  # ленивый импорт: renderer импортирует training
+    ren_t = rnd.load_renderer(ROOT / cfg.render_train, dev) if cfg.render_train else None
+    ren_v = rnd.load_renderer(ROOT / cfg.render_val, dev) if cfg.render_val else None
+    if ren_v is not None:
+        Xv = render_uint8(ren_v, Yv, dev, seed=cfg.seed + 5)
+        print(f"  сим2реал: val-входы отрендерены ({cfg.render_val})", flush=True)
     print(f"  val-поднабор: X {tuple(Xv.shape)}, Y {tuple(Yv.shape)}, P {tuple(Pv.shape)} "
           f"(профиль есть у {int(torch.isfinite(Pv).any(1).sum())}), {time.time() - t0:.1f} с", flush=True)
     lset = select_logging_set(df[df.split == "val"], ROOT / "runs" / cfg.stage / "logging_set.json")
     img_rows = df[df.path.isin([im["path"] for im in lset["images"]])].sort_values(["station", "time"]).head(cfg.log_images)
     img_rows = img_rows.reset_index(drop=True)
     Xi, Yi, Pi = decode(img_rows, min(cfg.workers, 2))
+    if ren_v is not None and len(Yi):
+        Xi = render_uint8(ren_v, Yi, dev, seed=cfg.seed + 6)
     cat_of = {im["path"]: im.get("cat", "") for im in lset["images"]}
     img_titles = [f"{r.station} {str(r.time)[:16]} {manifest.daynight(r.station, r.time)} C{int(r.c_level)} "
                   f"{cat_of.get(r.path, '')}" + (" ВОЗМ" if r.disturbed else "") for r in img_rows.itertuples()]
@@ -482,7 +500,9 @@ def train(cfg: TrainConfig) -> dict:
     day_sets = []
     for d in lset["days"]:
         rows = df[(df.station == d["station"]) & (pd.to_datetime(df.time).dt.date.astype(str) == d["date"])].sort_values("time")
-        Xd, _, _ = decode(rows, min(cfg.workers, 2))
+        Xd, Yd_, _ = decode(rows, min(cfg.workers, 2))
+        if ren_v is not None and len(Yd_):
+            Xd = render_uint8(ren_v, Yd_, dev, seed=cfg.seed + 7)
         day_sets.append((d, rows.reset_index(drop=True), Xd))
     print(f"  набор логирования: {len(img_rows)} панелей ({', '.join(f'{k}:{len(v)}' for k, v in img_groups.items())}), "
           f"{len(day_sets)} суток-треков", flush=True)
@@ -522,6 +542,9 @@ def train(cfg: TrainConfig) -> dict:
             if use_cache and not from_ram:
                 Xc[idx] = x; Yc[idx] = y; Pc[idx] = p; cached[idx] = True
             x, y, p = to_input(x, dev), y.to(dev, non_blocking=True).long(), p.to(dev, non_blocking=True)
+            if ren_t is not None:
+                with torch.no_grad():
+                    x = ren_t.sample(y)                               # новая реализация спекла на каждый показ
             with torch.autocast("cuda", enabled=scaler_amp.is_enabled()):
                 if cfg.profile:
                     lg, pr = net(x, profile=True)
@@ -621,7 +644,7 @@ def train(cfg: TrainConfig) -> dict:
                "best": (hist[best["epoch"]] if best["epoch"] >= 0 else {}), "last": last_m}
     (rundir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float), encoding="utf-8")
     hp = {k: asdict(cfg)[k] for k in ("variant", "depth", "base", "norm", "dropout", "skip", "profile", "lam", "lam_prof",
-                                      "lr", "sched", "batch", "seed", "epochs")}
+                                      "lr", "sched", "batch", "seed", "epochs", "render_train", "render_val")}
     hm = {f"hparam/{k.split('/')[-1]}": float(summary["best"].get(k, np.nan)) for k in
           ("val/IoU_F2", "val/foF2_med", "val/foF2_rmse", "val/hmF2_rmse", "val/prof_rmse", "val/logic_total", "gate/violations")
           if k in summary["best"]}
