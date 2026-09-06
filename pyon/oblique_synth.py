@@ -158,18 +158,28 @@ def group_index(fp: np.ndarray, f: float, f_b: float, mode: str) -> np.ndarray:
     return np.clip(mu, 0.0, 50.0)
 
 
-def hprime_from_profile(prof_h, prof_fp, f: float, f_b: float, mode: str) -> float:
-    """Действующая высота h′(f) = h₀ + ∫ μ′ dh до высоты отражения по профилю (h, fp); NaN, если волна не отражается."""
+def hprime_from_profile(prof_h, prof_fp, f, f_b: float, mode: str):
+    """Действующая высота h′(f) = h₀ + ∫ μ′ dh до высоты отражения по профилю (h, fp); NaN, если волна не
+    отражается внутри профиля. f — скаляр или массив (векторизовано по частотам: матрица [n_f, n_h])."""
     h = np.asarray(prof_h, float); fp = np.asarray(prof_fp, float)
     ok = np.isfinite(h) & np.isfinite(fp) & (fp > 0)
     h, fp = h[ok], fp[ok]
+    f = np.atleast_1d(np.asarray(f, float))
     if len(h) < 3:
-        return np.nan
-    mu = group_index(fp, f, f_b, mode)
-    if not np.isfinite(mu).any() or np.isfinite(mu).all():          # нет отражения внутри профиля
-        return np.nan
-    k = np.flatnonzero(np.isfinite(mu))
-    return float(h[0] + np.trapz(mu[k], h[k]))
+        return np.full(f.shape, np.nan) if f.size > 1 else np.nan
+    s_ = 1.0 if mode == "X" else 0.0
+    ff = f[:, None]
+    def n_of(q):
+        return np.sqrt(np.clip(1.0 - (fp[None, :] / q) ** 2 / (1.0 - s_ * f_b / q), 1e-9, None))
+    d = ff * 1e-3
+    mu = np.clip(n_of(ff) + ff * (n_of(ff + d) - n_of(ff - d)) / (2 * d), 0.0, 50.0)         # [n_f, n_h]
+    refl = (fp[None, :] / ff) ** 2 >= (1.0 - s_ * f_b / ff)                                   # отражение
+    has = refl.any(1); j = np.where(has, refl.argmax(1), len(h) - 1)
+    idx = np.arange(len(h))[None, :]
+    mu = np.where(idx <= j[:, None], mu, 0.0)                                                  # интегрируем до отражения
+    hp = h[0] + np.trapz(mu, h, axis=1)
+    hp = np.where(has & (j > 0), hp, np.nan)
+    return hp if f.size > 1 else float(hp[0])
 
 
 def x_trace_from_o(fv_o, hv_o, f_b: float, prof_h=None, prof_fp=None):
@@ -191,11 +201,10 @@ def x_trace_from_o(fv_o, hv_o, f_b: float, prof_h=None, prof_fp=None):
         # E3b (аудит 2026-09-06): h′x(fx) = h′o(fo) + [∫μ′x(fx) dh − ∫μ′o(fo) dh] по профилю NHPC;
         # без поправки ошибка медиана 11 км, у носа до 70 км. Поправка применяется там, где обе
         # волны отражаются внутри профиля; иначе — первый порядок (h′x = h′o).
-        for k in range(len(fv_o)):
-            ho = hprime_from_profile(prof_h, prof_fp, fv_o[k], f_b, "O")
-            hx = hprime_from_profile(prof_h, prof_fp, fx[k], f_b, "X")
-            if np.isfinite(ho) and np.isfinite(hx):
-                hv[k] = hv[k] + (hx - ho)
+        ho = hprime_from_profile(prof_h, prof_fp, fv_o, f_b, "O")
+        hx = hprime_from_profile(prof_h, prof_fp, fx, f_b, "X")
+        okc = np.isfinite(ho) & np.isfinite(hx)
+        hv[okc] = hv[okc] + (hx[okc] - ho[okc])
     return fx, hv
 
 
