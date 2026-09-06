@@ -88,9 +88,11 @@ def main():
             m[f"ext/track_{key}_median"] = float(np.nanmedian(days[key]))
     (rundir / "png").mkdir(exist_ok=True)
     picks = {}
-    if len(days):
-        picks["maxAp"] = days.sort_values("Ap", ascending=False).date.iloc[0]
-        picks["quiet_multi"] = days[days.Ap < 20].sort_values("multi", ascending=False).date.iloc[0] if (days.Ap < 20).any() else days.date.iloc[0]
+    full = days[days.n >= 48]                                   # только «полные» сутки (≥ 48 ионограмм) — иначе картинка из 1 точки
+    if len(full):
+        picks["maxAp"] = full.sort_values("Ap", ascending=False).date.iloc[0]
+        q = full[full.Ap < 20]
+        picks["quiet_multi"] = (q if len(q) else full).sort_values("multi", ascending=False).date.iloc[0]
     for kind, date in picks.items():
         rows = df[df.date == date].reset_index(drop=True); idx = df.index[df.date == date].values
         ctd = T.char_table(*T.predict(net, X[idx], dev, profile=cfg.profile)[::2], rows)
