@@ -264,7 +264,8 @@ def oblique_masks_from_sao(sao: dict, d_km: float, component: str = "O") -> tupl
         # в корпусе ARTIST-5 X-полилиний нет (0/200 val, аудит 2026-09-06) → X-следы из O-следов:
         # частоты точно по fo² = fx(fx − fB) (fB станции: ×0.89 для F-области, ×0.95 для E — гирочастота
         # на высоте слоя), высоты — с поправкой E3b по профилю NHPC, если он есть
-        fb0 = float(np.asarray(sao.get("geophys_const", [1.3]))[0]) if sao.get("geophys_const") is not None else 1.3
+        gc = sao.get("geophys_const")
+        fb0 = float(np.atleast_1d(np.asarray(gc, float))[0]) if gc is not None and np.size(gc) else 1.3
         ph, pf = sao.get("profile_h"), sao.get("profile_fp")
         for cls, okey in SAO_TRACES_BY_COMPONENT["O"].items():
             xkey = traces.get(cls)

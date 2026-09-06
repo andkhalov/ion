@@ -44,10 +44,16 @@ def _one(args):
     except Exception:
         return i, None
     out = []
-    fb = float(np.asarray(sao.get("geophys_const", [1.3]))[0]) if sao.get("geophys_const") is not None else 1.3
+    gc = sao.get("geophys_const")
+    fb = float(np.atleast_1d(np.asarray(gc, float))[0]) if gc is not None and np.size(gc) else 1.3
+    if not np.isfinite(fb) or fb <= 0:
+        fb = 1.3
     for d in obs.D_SET:
-        yo, lo = obs.oblique_masks_from_sao(sao, d, "O")
-        yx, lx = obs.oblique_masks_from_sao(sao, d, "X")
+        try:
+            yo, lo = obs.oblique_masks_from_sao(sao, d, "O")
+            yx, lx = obs.oblique_masks_from_sao(sao, d, "X")
+        except Exception:
+            return i, None
         lab = np.array([lo.get("muf_F2", np.nan), lo.get("muf_F1", np.nan), lo.get("muf_E", np.nan), lo.get("muf_Es", np.nan),
                         lo.get("muf_MH", np.nan), lx.get("muf_F2", np.nan), lx.get("muf_MH", np.nan), d, fb], np.float32)
         out.append((yo, yx, lab))
