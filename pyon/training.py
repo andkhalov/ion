@@ -106,6 +106,9 @@ class TrainConfig:
     device: str = "cuda"
     render_train: str = ""          # сим2реал (Э3 §3.4): веса рендерера → входы ОБУЧЕНИЯ рендерятся из масок каждый батч
     render_val: str = ""            # веса рендерера → val/панели/треки оцениваются на РЕНДЕРЕ (клетки «→рендер»)
+    bg_mode: str = ""               # трансплантация реального фона при render_train: "own" (фон того же образца) |
+                                    # "shuffle" (фон другого образца батча); "" — чистый рендер (Э3 §2 E4)
+    bg_dilate: int = 2              # радиус расширения маски следов (px) — внутри рендер, снаружи реальный фон
 
 
 # ---------------------------------------------------------------------------- служебное
@@ -166,6 +169,16 @@ def decode(df: pd.DataFrame, workers: int, batch: int = 128):
 
 def to_input(x: torch.Tensor, dev) -> torch.Tensor:
     return x.to(dev, non_blocking=True).float().div_(255)
+
+
+@torch.no_grad()
+def transplant(x_real: torch.Tensor, x_render: torch.Tensor, y: torch.Tensor, mode: str, dilate: int = 2) -> torch.Tensor:
+    """Трансплантация реального фона (Э3 §2 E4): внутри маски следов, расширенной на dilate px, — рендер;
+    снаружи — реальное сырьё того же образца ("own") или другого образца батча ("shuffle")."""
+    k = 2 * dilate + 1
+    region = torch.nn.functional.max_pool2d((y > 0).float().unsqueeze(1), k, stride=1, padding=dilate) > 0
+    bg = x_real if mode == "own" else x_real[torch.randperm(len(x_real), device=x_real.device)]
+    return torch.where(region, x_render, bg)
 
 
 @torch.no_grad()
@@ -544,7 +557,8 @@ def train(cfg: TrainConfig) -> dict:
             x, y, p = to_input(x, dev), y.to(dev, non_blocking=True).long(), p.to(dev, non_blocking=True)
             if ren_t is not None:
                 with torch.no_grad():
-                    x = ren_t.sample(y)                               # новая реализация спекла на каждый показ
+                    x_r = ren_t.sample(y)                             # новая реализация спекла на каждый показ
+                    x = transplant(x, x_r, y, cfg.bg_mode, cfg.bg_dilate) if cfg.bg_mode else x_r
             with torch.autocast("cuda", enabled=scaler_amp.is_enabled()):
                 if cfg.profile:
                     lg, pr = net(x, profile=True)
@@ -644,7 +658,7 @@ def train(cfg: TrainConfig) -> dict:
                "best": (hist[best["epoch"]] if best["epoch"] >= 0 else {}), "last": last_m}
     (rundir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float), encoding="utf-8")
     hp = {k: asdict(cfg)[k] for k in ("variant", "depth", "base", "norm", "dropout", "skip", "profile", "lam", "lam_prof",
-                                      "lr", "sched", "batch", "seed", "epochs", "render_train", "render_val")}
+                                      "lr", "sched", "batch", "seed", "epochs", "render_train", "render_val", "bg_mode")}
     hm = {f"hparam/{k.split('/')[-1]}": float(summary["best"].get(k, np.nan)) for k in
           ("val/IoU_F2", "val/foF2_med", "val/foF2_rmse", "val/hmF2_rmse", "val/prof_rmse", "val/logic_total", "gate/violations")
           if k in summary["best"]}
