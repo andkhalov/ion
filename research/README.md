@@ -12,6 +12,7 @@ links:
   - format_description.md
   - oblique_synthesis.md
   - 06-experiment-plan.md
+  - 07-experiment-report.md
   - ../README.md
   - ../pyonto/README.md
 ---
@@ -44,6 +45,7 @@ links:
 | Э1 | [format_description.md](format_description.md) | «краткий курс» (термины, физика, O/X, плазменная частота) + форматы RSF/SBF/SAO/EDP/DFT + источники данных и API + постановка обучения (§I.8) + итоги прототипов (§I.8.1–I.8.3-финал) |
 | Э2 | [oblique_synthesis.md](oblique_synthesis.md) | методика синтеза НЗ: три теоремы эквивалентности, сферическая геометрия, Бугер, нейрорендерер шума, механизм релаксации (§4-bis, включая сверку с LTN/van Krieken/Домингосом и раздел PINN), результаты, литература |
 | Э3 | [06-experiment-plan.md](06-experiment-plan.md) | **постановка полноценного эксперимента**: цели, конвейер, метрики, протокол валидации, критерии успеха — операционализация для серверного прогона |
+| Э4 | [07-experiment-report.md](07-experiment-report.md) | **сводный отчёт эксперимента** (draft): корпус, калибровка измерителя, E1–E5 полностью (таблицы всех метрик, внешний тест, гейт-исследование, сим2реал-матрица, НЗ-модель), E6 Тромсё (идёт), выводы по S1–S5, воспроизведение |
 
 Ноутбуки-прототипы (в корне, НЕ трогать — исторические артефакты с выполненными выходами):
 [`ion.ipynb`](../ion.ipynb) → [`prototype.ipynb`](../prototype.ipynb) →
@@ -56,4 +58,4 @@ links:
 физика и форматы → [Э1](format_description.md) · методика НЗ и релаксация →
 [Э2](oblique_synthesis.md) · онтология → [`../pyonto/README.md`](../pyonto/README.md) ·
 библиотека → [`../pyon/__init__.py`](../pyon/__init__.py) · план эксперимента →
-[Э3](06-experiment-plan.md) · задача агенту → [`../CLAUDE.md`](../CLAUDE.md)
+[Э3](06-experiment-plan.md) · итоги → [Э4](07-experiment-report.md) · задача агенту → [`../CLAUDE.md`](../CLAUDE.md)
