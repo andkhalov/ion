@@ -109,6 +109,7 @@ class TrainConfig:
     bg_mode: str = ""               # трансплантация реального фона при render_train: "own" (фон того же образца) |
                                     # "shuffle" (фон другого образца батча); "" — чистый рендер (Э3 §2 E4)
     bg_dilate: int = 2              # радиус расширения маски следов (px) — внутри рендер, снаружи реальный фон
+    render_corr: str = "0,0"        # длина корреляции спекла рендерера при обучении "k_h,k_f" (0,0 — iid)
 
 
 # ---------------------------------------------------------------------------- служебное
@@ -498,6 +499,8 @@ def train(cfg: TrainConfig) -> dict:
     Xv, Yv, Pv = decode(va, cfg.workers)
     from pyon import renderer as rnd                                  # ленивый импорт: renderer импортирует training
     ren_t = rnd.load_renderer(ROOT / cfg.render_train, dev) if cfg.render_train else None
+    if ren_t is not None:
+        ren_t.corr = tuple(int(v) for v in cfg.render_corr.split(","))
     ren_v = rnd.load_renderer(ROOT / cfg.render_val, dev) if cfg.render_val else None
     if ren_v is not None:
         Xv = render_uint8(ren_v, Yv, dev, seed=cfg.seed + 5)
@@ -662,7 +665,7 @@ def train(cfg: TrainConfig) -> dict:
                "best": (hist[best["epoch"]] if best["epoch"] >= 0 else {}), "last": last_m}
     (rundir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float), encoding="utf-8")
     hp = {k: asdict(cfg)[k] for k in ("variant", "depth", "base", "norm", "dropout", "skip", "profile", "lam", "lam_prof",
-                                      "lr", "sched", "batch", "seed", "epochs", "render_train", "render_val", "bg_mode")}
+                                      "lr", "sched", "batch", "seed", "epochs", "render_train", "render_val", "bg_mode", "render_corr")}
     hm = {f"hparam/{k.split('/')[-1]}": float(summary["best"].get(k, np.nan)) for k in
           ("val/IoU_F2", "val/foF2_med", "val/foF2_rmse", "val/hmF2_rmse", "val/prof_rmse", "val/logic_total", "gate/violations")
           if k in summary["best"]}

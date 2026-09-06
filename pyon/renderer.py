@@ -65,6 +65,7 @@ class Renderer(nn.Module):
         self.pos_weight = float(pos_weight)     # тот же, что в render_loss: нужен для калибровки при сэмплировании
         self.hetero, self.col_noise = bool(hetero), bool(col_noise)
         self.npol = 3 if hetero else 2
+        self.corr = (0, 0)                      # (k_h, k_f): длина корреляции спекла при сэмплировании; (0,0) — iid
         self.net = UNet(n_classes + 3 + int(col_noise), 2 * self.npol, base=base, depth=depth)
 
     def make_input(self, mask: torch.Tensor, noise: torch.Tensor | None = None) -> torch.Tensor:
@@ -95,9 +96,25 @@ class Renderer(nn.Module):
             p = torch.sigmoid(o[:, 0] - math.log(self.pos_weight))
             a = o[:, 1]
             if self.hetero:
-                a = a + Fn.softplus(o[:, 2]) * torch.randn_like(a)
-            xs.append((torch.rand_like(p) < p).float() * a.clamp(0, 1))
+                a = a + Fn.softplus(o[:, 2]) * self._noise(a)
+            xs.append((self._uniform(p) < p).float() * a.clamp(0, 1))
         return torch.stack(xs, 1)
+
+    def _noise(self, like: torch.Tensor) -> torch.Tensor:
+        """N(0,1)-поле: iid или пространственно коррелированное (box-блюр k_h×k_f белого шума с
+        нормировкой √n — маргинал остаётся N(0,1); диагностика 2026-09-05: у реального сырья активные
+        пиксели идут сплошными отрезками при той же доле, iid-Бернулли даёт «соль-перец»)."""
+        g = torch.randn_like(like)
+        kh, kf = self.corr
+        if kh > 1 or kf > 1:
+            kh, kf = max(kh, 1), max(kf, 1)
+            g = Fn.avg_pool2d(g.unsqueeze(1), (kh, kf), stride=1, padding=(kh // 2, kf // 2))[:, 0, :like.shape[1], :like.shape[2]]
+            g = g * math.sqrt(kh * kf)
+        return g
+
+    def _uniform(self, like: torch.Tensor) -> torch.Tensor:
+        """U(0,1)-поле с той же корреляцией: Φ(N(0,1)) — P(u < p) = p поточечно сохраняется."""
+        return 0.5 * (1 + torch.erf(self._noise(like) / math.sqrt(2)))
 
 
 def render_loss(out: torch.Tensor, x: torch.Tensor, pos_weight: float = 8.0, hetero: bool = False) -> torch.Tensor:
