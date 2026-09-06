@@ -141,7 +141,38 @@ def bouguer_trace(prof_h, prof_fp, f_mhz: float, phi0_deg: float, n_int: int = 4
     return float(dD), float(dP)
 
 
-def x_trace_from_o(fv_o, hv_o, f_b: float):
+def group_index(fp: np.ndarray, f: float, f_b: float, mode: str) -> np.ndarray:
+    """Групповой показатель μ′ = d(f·n)/df квазипродольной формулы Апплтона–Хартри без столкновений:
+    n² = 1 − X/(1 − s·Y), X = fp²/f², Y = fB/f; s = 0 — O-мода (отражение при X = 1), s = 1 — X-мода
+    (отражение при X = 1 − Y ⇔ fo² = fx(fx − fB)). Возвращает μ′ на узлах профиля до отражения (NaN выше)."""
+    s = 1.0 if mode == "X" else 0.0
+    def n_of(ff):
+        return np.sqrt(np.clip(1.0 - (fp / ff) ** 2 / (1.0 - s * f_b / ff), 1e-9, None))
+    n = n_of(f); d = f * 1e-3
+    mu = n + f * (n_of(f + d) - n_of(f - d)) / (2 * d)
+    refl = (fp / f) ** 2 >= (1.0 - s * f_b / f)
+    j = np.flatnonzero(refl)
+    mu = mu.astype(float)
+    if len(j):
+        mu[j[0] + 1:] = np.nan
+    return np.clip(mu, 0.0, 50.0)
+
+
+def hprime_from_profile(prof_h, prof_fp, f: float, f_b: float, mode: str) -> float:
+    """Действующая высота h′(f) = h₀ + ∫ μ′ dh до высоты отражения по профилю (h, fp); NaN, если волна не отражается."""
+    h = np.asarray(prof_h, float); fp = np.asarray(prof_fp, float)
+    ok = np.isfinite(h) & np.isfinite(fp) & (fp > 0)
+    h, fp = h[ok], fp[ok]
+    if len(h) < 3:
+        return np.nan
+    mu = group_index(fp, f, f_b, mode)
+    if not np.isfinite(mu).any() or np.isfinite(mu).all():          # нет отражения внутри профиля
+        return np.nan
+    k = np.flatnonzero(np.isfinite(mu))
+    return float(h[0] + np.trapz(mu[k], h[k]))
+
+
+def x_trace_from_o(fv_o, hv_o, f_b: float, prof_h=None, prof_fp=None):
     """X-след из O-следа вертикальной ионограммы (в корпусе ARTIST-5 X-полилиний
     в SAO нет — проверено 0/224 файлов, есть только скаляр fxI).
 
@@ -154,9 +185,18 @@ def x_trace_from_o(fv_o, hv_o, f_b: float):
     fB — гирочастота станции (МГц); для F-области умножать на ≈0.89 (см. онтологию,
     iono-observation:hasStationGyroFrequency).
     """
-    fv_o = np.asarray(fv_o, float)
+    fv_o = np.asarray(fv_o, float); hv = np.asarray(hv_o, float).copy()
     fx = f_b / 2.0 + np.sqrt((f_b / 2.0) ** 2 + fv_o ** 2)
-    return fx, np.asarray(hv_o, float).copy()
+    if prof_h is not None and prof_fp is not None and len(np.asarray(prof_h)) >= 3:
+        # E3b (аудит 2026-09-06): h′x(fx) = h′o(fo) + [∫μ′x(fx) dh − ∫μ′o(fo) dh] по профилю NHPC;
+        # без поправки ошибка медиана 11 км, у носа до 70 км. Поправка применяется там, где обе
+        # волны отражаются внутри профиля; иначе — первый порядок (h′x = h′o).
+        for k in range(len(fv_o)):
+            ho = hprime_from_profile(prof_h, prof_fp, fv_o[k], f_b, "O")
+            hx = hprime_from_profile(prof_h, prof_fp, fx[k], f_b, "X")
+            if np.isfinite(ho) and np.isfinite(hx):
+                hv[k] = hv[k] + (hx - ho)
+    return fx, hv
 
 
 def raster_polyline(xs, ys, x0, x1, y0, y1, n: int = 128, thick: int = 1) -> np.ndarray:
@@ -167,7 +207,10 @@ def raster_polyline(xs, ys, x0, x1, y0, y1, n: int = 128, thick: int = 1) -> np.
         return g
     for k in range(max(1, len(xs) - 1)):
         k2 = min(k + 1, len(xs) - 1)
-        m = 8
+        # число точек на сегмент — по его длине в ячейках (у носа 2F2 сегменты по P′ длиннее 8 ячеек
+        # давали разрывы: аудит 2026-09-06, 6 % следов MH)
+        span = max(abs(xs[k2] - xs[k]) / (x1 - x0), abs(ys[k2] - ys[k]) / (y1 - y0)) * (n - 1)
+        m = int(max(8, np.ceil(span) + 2))
         xi = np.linspace(xs[k], xs[k2], m); yi = np.linspace(ys[k], ys[k2], m)
         jx = np.round((xi - x0) / (x1 - x0) * (n - 1)).astype(int)
         jy = np.round((yi - y0) / (y1 - y0) * (n - 1)).astype(int)
@@ -190,7 +233,7 @@ def raster_polyline(xs, ys, x0, x1, y0, y1, n: int = 128, thick: int = 1) -> np.
 # (Джонс–Стивенсон; PHaRLAP/IONORT); принятая здесь точность — уровень данных SAO.
 SAO_TRACES_BY_COMPONENT = {
     "O": {"F2": "F2o", "F1": "F1o", "E": "Eo", "Es": "Es"},
-    "X": {"F2": "F2x", "F1": "F1x", "E": "Ex"},   # Es в SAO 4.3 даётся без X-полилинии
+    "X": {"F2": "F2x", "F1": "F1x", "E": "Ex", "Es": "Esx"},   # Es в SAO 4.3 без X-полилинии — Esx строится из Es
 }
 SAO_TRACES = SAO_TRACES_BY_COMPONENT["O"]         # обратная совместимость
 
@@ -207,6 +250,21 @@ def oblique_masks_from_sao(sao: dict, d_km: float, component: str = "O") -> tupl
     y = np.zeros((NP, NF), np.int8)
     labels = {}
     mh_mufs = []
+    sao = dict(sao)
+    if component == "X" and not len(sao.get(f"{f2key}_freq", []) or []):
+        # в корпусе ARTIST-5 X-полилиний нет (0/200 val, аудит 2026-09-06) → X-следы из O-следов:
+        # частоты точно по fo² = fx(fx − fB) (fB станции: ×0.89 для F-области, ×0.95 для E — гирочастота
+        # на высоте слоя), высоты — с поправкой E3b по профилю NHPC, если он есть
+        fb0 = float(np.asarray(sao.get("geophys_const", [1.3]))[0]) if sao.get("geophys_const") is not None else 1.3
+        ph, pf = sao.get("profile_h"), sao.get("profile_fp")
+        for cls, okey in SAO_TRACES_BY_COMPONENT["O"].items():
+            xkey = traces.get(cls)
+            fq, vh = sao.get(f"{okey}_freq"), sao.get(f"{okey}_vh")
+            if xkey is None or fq is None or vh is None or not len(fq):
+                continue
+            fb = fb0 * (0.89 if cls in ("F2", "F1") else 0.95)
+            fx, hx = x_trace_from_o(fq, vh, fb, ph, pf)
+            sao[f"{xkey}_freq"], sao[f"{xkey}_vh"] = fx, hx
     # сначала MH (2 скачка F2), потом 1-скачковые поверх — приоритет у основного следа.
     # MH сознательно ограничен кратником F2: доминирующая многоскачковая мода на реальных НЗ;
     # смешение слоёв в одном классе ломало бы семантику мод 2F2 при проверке форм S1/S2.
