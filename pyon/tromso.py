@@ -44,31 +44,53 @@ from pyon import validate as vd                                                 
 from pyon.oblique_train import muf_readouts, predict                              # noqa: E402
 from pyon.models import UNet                                                     # noqa: E402
 
-AXES = dict(f=(0.5, 16.0), r=(200.0, 1500.0), snr_max_db=20.0)                   # пределы осей дашборда
+SNR_MAX_DB = 20.0                                                                 # чёрный = 20 дБ
 ROUTES = {"sgo-tgo": 430.0, "juliusruh-tgo": 1500.0}                             # длина трассы, км (D)
+# Шкалы восстанавливаются по ТИК-МЕТКАМ осей (короткие штрихи под нижним и слева от левого спайна):
+# значение первой (левой) метки f и шаг; значение верхней метки r и шаг вниз. Проверено 2026-09-06:
+# SGO→TGO 1200×900 — f 2,4,…,16; r 1400…200 (поле 0.5–16 МГц × 200–1500 км); Juliusruh→TGO 640×480 —
+# f 2,…,12; r 4000…1500 (поле 1–14 МГц × 1500–4500 км).
+TICKS = {"sgo-tgo": dict(f0=2.0, df=2.0, r_top=1400.0, dr=-200.0),
+         "juliusruh-tgo": dict(f0=2.0, df=2.0, r_top=4000.0, dr=-500.0)}
 
 
 def axes_box(gray: np.ndarray):
-    """Бокс осей matplotlib: длинные тёмные линии (спайны); колорбар справа исключаем."""
-    dark = gray < 60
+    """Бокс осей matplotlib: спайны — длинные тёмные линии; пара спайнов графика — по наибольшему
+    промежутку между ними (колорбар справа даёт свои спайны с малым промежутком)."""
+    dark = gray < 100
     rows = np.flatnonzero(dark.mean(1) > 0.6); cols = np.flatnonzero(dark.mean(0) > 0.6)
-    cols = cols[cols < gray.shape[1] * 0.85]
     if len(rows) < 2 or len(cols) < 2:
         raise ValueError("не найден бокс осей")
-    return int(cols.min()), int(cols.max()), int(rows.min()), int(rows.max())
+    k = int(np.argmax(np.diff(cols))); ky = int(np.argmax(np.diff(rows)))
+    return int(cols[k]), int(cols[k + 1]), int(rows[ky]), int(rows[ky + 1])
 
 
-def png_to_snr(path: str | Path):
-    """PNG → (SNR [h, w] дБ внутри бокса осей, оси f [w] МГц, r [h] км)."""
+def tick_marks(gray: np.ndarray, box) -> tuple[np.ndarray, np.ndarray]:
+    """Пиксели тик-меток: по x — тёмные пиксели в строке сразу под нижним спайном, по y — в столбце
+    слева от левого спайна (штрихи 3–4 px)."""
+    x0, x1, y0, y1 = box
+    dark = gray < 100
+    tx = np.flatnonzero(dark[y1 + 2, x0:x1 + 1]) + x0
+    ty = np.flatnonzero(dark[y0:y1 + 1, x0 - 2]) + y0
+    tx = tx[np.r_[True, np.diff(tx) > 2]]; ty = ty[np.r_[True, np.diff(ty) > 2]]      # слить соседние пиксели
+    if len(tx) < 2 or len(ty) < 2:
+        raise ValueError("не найдены тик-метки")
+    return tx, ty
+
+
+def png_to_snr(path: str | Path, route: str = "sgo-tgo"):
+    """PNG → (SNR [h, w] дБ внутри бокса осей, оси f [w] МГц, r [h] км) — шкалы по тик-меткам."""
     gray = np.asarray(Image.open(path).convert("L"), dtype=np.float32)
-    x0, x1, y0, y1 = axes_box(gray)
+    box = axes_box(gray); x0, x1, y0, y1 = box
+    tx, ty = tick_marks(gray, box); tk = TICKS[route]
+    px_f = (tx[-1] - tx[0]) / (len(tx) - 1) / tk["df"]                   # px на МГц
+    px_r = (ty[-1] - ty[0]) / (len(ty) - 1) / tk["dr"]                   # px на км (отрицательно)
     m = 3                                                                # отступ от спайнов (антиалиасинг)
     inner = gray[y0 + m:y1 - m + 1, x0 + m:x1 - m + 1]
-    snr = AXES["snr_max_db"] * (1.0 - inner / 255.0)
-    fa, fb = AXES["f"]; ra, rb = AXES["r"]
-    W, H = x1 - x0, y1 - y0
-    f = fa + (fb - fa) * (np.arange(inner.shape[1]) + m) / W
-    r = rb - (rb - ra) * (np.arange(inner.shape[0]) + m) / H
+    snr = SNR_MAX_DB * (1.0 - inner / 255.0)
+    xs = np.arange(inner.shape[1]) + x0 + m; ys = np.arange(inner.shape[0]) + y0 + m
+    f = tk["f0"] + (xs - tx[0]) / px_f
+    r = tk["r_top"] + (ys - ty[0]) / px_r
     return snr, f, r
 
 
@@ -77,7 +99,7 @@ def rasterize(snr: np.ndarray, f: np.ndarray, r: np.ndarray, x_mode: str = "zero
     """SNR-картинка → (X uint8 [2, NP, NF] на решётке oblique_synth, covered [NP, NF] — где есть данные):
     порог = квантиль (1 − active) SNR, растяжение так, что 99.9-й перцентиль сигнала → 255, max по ячейке;
     вне поля картинки — pad (фон рендерера E4 [2, NP, NF] 0..255) или нули."""
-    keep = f <= AXES["f"][1] - 1.0                                   # крайние бины по частоте — яркая кромка картинки (до ~15.3 МГц)
+    keep = f <= f.max() - 0.7                                        # крайние бины по частоте — яркая кромка картинки
     snr, f = snr[:, keep], f[keep]
     jf = canon.to_grid(f, obs.FOB_MIN, obs.FOB_MAX, obs.NF); jp = canon.to_grid(r, obs.P_MIN, obs.P_MAX, obs.NP)
     okf, okp = jf >= 0, jp >= 0
@@ -145,7 +167,7 @@ def main():
     xs, cov, times = [], [], []
     for fp in files:
         try:
-            snr, f, r = png_to_snr(fp); x, cv = rasterize(snr, f, r, a.x_mode, a.active, pad); xs.append(x); cov.append(cv); times.append(fp.stem)
+            snr, f, r = png_to_snr(fp, a.route); x, cv = rasterize(snr, f, r, a.x_mode, a.active, pad); xs.append(x); cov.append(cv); times.append(fp.stem)
         except Exception as e:                                   # битая/неполная картинка
             print("  пропуск", fp.name, e)
     X = torch.from_numpy(np.stack(xs)).float().div(255)
