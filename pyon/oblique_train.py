@@ -81,6 +81,7 @@ class ObliqueConfig:
     max_steps: int = 0
     dry: bool = False
     device: str = "cuda"
+    render_corr: str = "9,3"        # длина корреляции спекла рендерера "k_h,k_f" (см. training.TrainConfig)
 
 
 def decode_oblique(df: pd.DataFrame, component: str, workers: int, seed: int = 0, fixed_d=None, batch: int = 128):
@@ -181,6 +182,7 @@ def train_oblique(cfg: ObliqueConfig) -> dict:
     tc = training.TrainConfig(manifest=cfg.manifest, limit=cfg.limit, val_size=cfg.val_size)
     df, tr, va = training.load_split(tc)
     ren = rnd.load_renderer(ROOT / cfg.renderer, dev)
+    ren.corr = tuple(int(v) for v in cfg.render_corr.split(","))
     mh2f2 = rnd.MH2F2.to(dev)
     t0 = time.time()
     Yv, Dv, M1, M2 = decode_oblique(va, cfg.component, cfg.workers, seed=cfg.seed + 7)

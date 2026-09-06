@@ -65,7 +65,9 @@ class Renderer(nn.Module):
         self.pos_weight = float(pos_weight)     # тот же, что в render_loss: нужен для калибровки при сэмплировании
         self.hetero, self.col_noise = bool(hetero), bool(col_noise)
         self.npol = 3 if hetero else 2
-        self.corr = (0, 0)                      # (k_h, k_f): длина корреляции спекла при сэмплировании; (0,0) — iid
+        self.corr = (9, 3)                      # (k_h, k_f): длина корреляции спекла при сэмплировании; (0,0) — iid.
+                                                # Калибровка 2026-09-05 по фону реального сырья: P(сосед|активен)/p
+                                                # по f / по h — реальное 3.68 / 5.56, (9,3) → 3.86 / 5.10, iid → 2.25 / 2.44
         self.net = UNet(n_classes + 3 + int(col_noise), 2 * self.npol, base=base, depth=depth)
 
     def make_input(self, mask: torch.Tensor, noise: torch.Tensor | None = None) -> torch.Tensor:
