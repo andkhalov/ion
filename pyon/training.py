@@ -501,6 +501,15 @@ def train(cfg: TrainConfig) -> dict:
                 git_commit=_git_commit(), manifest_md5=_md5(ROOT / cfg.manifest), argv=" ".join(sys.argv),
                 started=time.strftime("%Y-%m-%d %H:%M:%S %Z"))
     log = tblog.TBLog(rundir, asdict(cfg) | prov)
+    log.readme(f"""## {cfg.stage}/{cfg.run} — ВЗ-модель (модельное представление ARTIST), вариант **{cfg.variant}**
+Вход: реальная ионограмма (O, X) 128×128 (1–15 МГц × 80–720 км); цель: маска классов ARTIST (F2/F1/E/Es) + профиль Nₑ(h).
+**SCALARS**: `1_train/*` — лоссы по эпохам (CE сегментации, logic — онтологический член, prof — профиль);
+`2_val/*` — ключевые метрики на val ({cfg.val_size} ионограмм, 5 станций): IoU по классам, foF2 RMSE/медиана/«точно по РД» (МГц), hmF2 RMSE/медиана (км),
+prof_rmse — невязка профиля Nₑ(h) (МГц), logic_total — нарушения физики (hinge-мера, меньше = лучше); `3_gate/*` — доля SHACL-нарушений на инференсе (каждые {cfg.gate_every} эп.), artist_violations — референс ARTIST.
+**TEXT**: `tables/val` — полная таблица дигизонда (все характеристики: RMSE/медиана/bias); `tables/strat` — страты (станция, день/ночь, возмущённость);
+`tables/track` — метрики суточных треков; `tables/time` — времена. **IMAGES**: `digisonde/<станция>` — панели «как у дигизонда» (эхо, следы ARTIST, наши контуры,
+профили ARTIST чёрный / наш красный, таблица ARTIST|наша|Δ) на фиксированном показательном наборе; `track/<станция_дата_тип>` — суточный ход foF2/fxI/fmin/h′F/hmF2 (ARTIST точки, модель линия) + диаграммы разброса.
+**HPARAMS** — сравнение ранов этапа. Полные числа — `metrics.csv`, `summary.json`, `val_readouts.csv`, `tracks.csv`; PNG-копии панелей — `png/`.""")
     t_all = time.time()
 
     df, tr, va = load_split(cfg)

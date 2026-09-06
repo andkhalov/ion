@@ -178,6 +178,15 @@ def train_oblique(cfg: ObliqueConfig) -> dict:
                 manifest_md5=training._md5(ROOT / cfg.manifest), argv=" ".join(sys.argv),
                 started=time.strftime("%Y-%m-%d %H:%M:%S %Z"))
     log = tblog.TBLog(rundir, asdict(cfg) | prov)
+    log.readme(f"""## {cfg.stage}/{cfg.run} — НЗ-модель на синтетике, вариант **{cfg.variant}**
+Вход: синтетическая НЗ-ионограмма 128×128 (2–24 МГц × 300–3200 км групповой путь) = маска ARTIST, пересчитанная сферическим секансом
+(D ∈ {{300, 800, 1500}} км, компонента {cfg.component}) и «озвученная» рендерером `{cfg.renderer}`; цель: классы F2/F1/E/Es/MH (кратник).
+**SCALARS**: `1_train/*` — лоссы; `2_val/*` — IoU по классам, МПЧ 1F2/2F2 RMSE и медиана (МГц, против аналитических меток),
+inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономарчука МПЧ(2F2)/МПЧ(1F2) (должны совпадать), logic_total — нарушения физики;
+`3_gate/*` — SHACL-нарушения на инференсе (labels_violations — референс меток, ожидание 0).
+**TEXT**: `tables/strat` — по дальностям D; `tables/track` — суточные треки МПЧ(t) при D = {cfg.track_d:.0f} км; `tables/crosstest` — ВЗ-модель zero-shot на НЗ (должна быть много хуже).
+**IMAGES**: `images/fixed_set` — вход | метка | предсказание (фиксированный набор, по D); `track/*` — суточный ход МПЧ 1F2/2F2 (метки точки, модель линия).
+**HISTOGRAMS**: инвариант Пономарчука (предсказание vs метки). Полные числа — `metrics.csv`, `summary.json`; PNG — `png/`.""")
     t_all = time.time()
     tc = training.TrainConfig(manifest=cfg.manifest, limit=cfg.limit, val_size=cfg.val_size)
     df, tr, va = training.load_split(tc)

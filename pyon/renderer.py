@@ -191,6 +191,12 @@ def train_renderer(cfg: RenderConfig) -> dict:
                 manifest_md5=training._md5(ROOT / cfg.manifest), argv=" ".join(sys.argv),
                 started=time.strftime("%Y-%m-%d %H:%M:%S %Z"))
     log = tblog.TBLog(rundir, asdict(cfg) | prov)
+    log.readme(f"""## {cfg.stage}/{cfg.run} — рендерер шума (маска ARTIST → синтетическое сырьё)
+Учится на реальных парах (сырьё, маска): по one-hot маске + координатам + шуму предсказывает на каждую поляризацию вероятность активности p и амплитуду
+(hetero={cfg.hetero}: μ и log σ; col_noise={cfg.col_noise}). **SCALARS**: `1_train/loss`, `2_val/loss` — лосс (BCE + NLL/L1; между режимами hetero несравним);
+`2_val/ks_amp_O` — KS-расстояние распределений амплитуд активных пикселей реальное vs рендер (меньше = лучше); `2_val/active_real_O` vs `active_synt_O` — доля активных пикселей;
+`2_val/dens_freq_l1_O`, `dens_height_l1_O` — L1 невязки профилей плотности эха по частоте/высоте. **IMAGES**: `renders` — реальное (O) | маска ARTIST | рендер 1 | рендер 2
+(две реализации спекла) на фиксированном наборе — ГЛАВНАЯ визуальная проверка. Главный судья качества — сим2реал-матрица (обучение сегментатора на рендере → оценка на реальном), см. этап сим2реал.""")
     t_all = time.time()
     tc = training.TrainConfig(manifest=cfg.manifest, limit=cfg.limit, val_size=cfg.val_size)
     df, tr, va = training.load_split(tc)

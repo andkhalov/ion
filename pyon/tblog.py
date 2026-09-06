@@ -11,6 +11,7 @@ foF2(t)/МПЧ(t) «модель vs ARTIST/метки» (Э3 §3.5-б), гист
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import matplotlib
@@ -39,11 +40,40 @@ class TBLog:
             self.w.add_text("config", "```\n" + json.dumps(config, ensure_ascii=False, indent=1, default=str) + "\n```")
 
     # ---------------------------------------------------------------- скаляры / csv
+    # Графики (SCALARS) — только ключевые метрики (решение АХ 2026-09-06: «208 гетерогенных графиков
+    # track, 144 val — непонятно, на что смотрим»); всё остальное — таблицами во вкладке TEXT
+    # (tables/<группа>, по шагам) и в metrics.csv. Имена групп графиков: 1_train, 2_val, 3_gate.
+    KEY = [r"^train/(CE|logic|prof|loss|lr)$",
+           r"^val/(IoU_F2|IoU_F1|IoU_E|IoU_Es|IoU_MH|foF2_rmse|foF2_med|foF2_rd_exact|hmF2_rmse|hmF2_med|prof_rmse|logic_total|CE)$",
+           r"^val/(MUF1F2_rmse|MUF1F2_med|MUF2F2_rmse|inv_ratio_pred_med|inv_ratio_label_med)$",
+           r"^val/(ks_amp_O|active_real_O|active_synt_O|dens_freq_l1_O|dens_height_l1_O|loss)$",
+           r"^gate/(violations|warnings|artist_violations|labels_violations)$"]
+    GROUP = {"train": "1_train", "val": "2_val", "gate": "3_gate"}
+
     def scalars(self, values: dict, step: int, prefix: str = ""):
+        keys = [re.compile(k) for k in self.KEY]
+        rest: dict[str, dict] = {}
         for k, v in values.items():
             if v is None or (isinstance(v, float) and not np.isfinite(v)):
                 continue
-            self.w.add_scalar(prefix + k, float(v), step)
+            k = prefix + k
+            if any(r.match(k) for r in keys):
+                g, name = k.split("/", 1)
+                self.w.add_scalar(f"{self.GROUP.get(g, g)}/{name}", float(v), step)
+            else:
+                rest.setdefault(k.split("/", 1)[0], {})[k] = v
+        for g, d in rest.items():
+            self.table(f"tables/{g}", d, step)
+
+    def table(self, tag: str, values: dict, step: int, title: str = ""):
+        """Словарь метрик → markdown-таблица во вкладке TEXT (одна запись на шаг)."""
+        rows = "\n".join(f"| {k} | {v:.4g} |" if isinstance(v, (int, float, np.floating, np.integer)) else f"| {k} | {v} |"
+                         for k, v in values.items())
+        self.w.add_text(tag, (f"**{title}** (шаг {step})\n\n" if title else f"шаг {step}\n\n") + "| метрика | значение |\n|---|---|\n" + rows, step)
+
+    def readme(self, text: str):
+        """Карточка «что здесь показано» (TEXT/00_readme) — обязательна для каждого рана."""
+        self.w.add_text("00_readme", text, 0)
 
     def row(self, values: dict, step: int):
         """Строка metrics.csv (перезаписывается целиком — файл мал)."""
