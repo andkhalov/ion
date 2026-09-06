@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -102,6 +102,68 @@ class ObliqueDataset(Dataset):
             y, muf_f2, muf_mh = np.zeros((obs.NP, obs.NF), np.int8), np.nan, np.nan
         return (torch.from_numpy(np.ascontiguousarray(y, dtype=np.int8)), torch.tensor(d),
                 torch.tensor(float(muf_f2)), torch.tensor(float(muf_mh)))
+
+
+class ObliqueShardDataset(Dataset):
+    """Материализованный НЗ-датасет (`pyon.oblique_dataset`): шарды npz → (маска O, маска X, метки).
+    Шард распаковывается целиком при первом обращении и держится в кэше воркера; вместе с
+    `ShardSampler` (обход по шардам) каждый шард распаковывается ровно один раз за эпоху."""
+
+    def __init__(self, root, split: str, cache: int = 1):
+        self.files = sorted(Path(root).glob(f"{split}_*.npz"))
+        if not self.files:
+            raise FileNotFoundError(f"нет шардов {split}_*.npz в {root}")
+        self.sizes = []
+        for f in self.files:
+            with np.load(f) as z:
+                self.sizes.append(int(len(z["idx"])))
+        self.offsets = np.cumsum([0] + self.sizes)
+        self.cache_size = max(1, cache)
+        self._cache: dict = {}
+
+    def __len__(self):
+        return int(self.offsets[-1])
+
+    def shard_of(self, i: int) -> int:
+        return int(np.searchsorted(self.offsets, i, side="right") - 1)
+
+    def _shard(self, k: int):
+        if k not in self._cache:
+            if len(self._cache) >= self.cache_size:
+                self._cache.pop(next(iter(self._cache)))
+            with np.load(self.files[k]) as z:
+                self._cache[k] = (z["masks_o"], z["masks_x"], z["labels"], z["idx"])
+        return self._cache[k]
+
+    def __getitem__(self, i: int):
+        k = self.shard_of(i)
+        mo, mx, lab, _ = self._shard(k)
+        j = int(i - self.offsets[k])
+        return (torch.from_numpy(np.ascontiguousarray(mo[j])), torch.from_numpy(np.ascontiguousarray(mx[j])),
+                torch.from_numpy(np.ascontiguousarray(lab[j])))
+
+
+class ShardSampler(Sampler):
+    """Порядок обхода шардового датасета: шарды в случайном порядке, внутри шарда — перемешивание
+    (распаковка каждого шарда один раз за эпоху). `set_epoch(e)` меняет порядок."""
+
+    def __init__(self, ds: ObliqueShardDataset, seed: int = 0, shuffle: bool = True):
+        self.ds, self.seed, self.shuffle, self.epoch = ds, seed, shuffle, 0
+
+    def set_epoch(self, e: int):
+        self.epoch = e
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __iter__(self):
+        rng = np.random.default_rng((self.seed, self.epoch))
+        order = rng.permutation(len(self.ds.files)) if self.shuffle else np.arange(len(self.ds.files))
+        for k in order:
+            idx = np.arange(self.ds.offsets[k], self.ds.offsets[k + 1])
+            if self.shuffle:
+                rng.shuffle(idx)
+            yield from idx.tolist()
 
 
 class WithIndex(Dataset):

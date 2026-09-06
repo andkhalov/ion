@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
+import torch.nn.functional as Fn
 from torch.utils.data import DataLoader
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -82,6 +83,12 @@ class ObliqueConfig:
     dry: bool = False
     device: str = "cuda"
     render_corr: str = "9,3"        # длина корреляции спекла рендерера "k_h,k_f" (см. training.TrainConfig)
+    dataset: str = ""               # материализованный НЗ-датасет (pyon.oblique_dataset, шарды npz); "" — синтез на лету
+    input_mode: str = "ox"          # "ox" — вход = суммарная мощность O + X в одном канале (как видит чирп-зонд,
+                                    # поляризации не разделены); "o" — только O (режим раунда 1)
+    tromso_route: str = "sgo-tgo"   # контроль на РЕАЛЬНЫХ НЗ каждый eval (без меток: доля найденных F2, МПЧ, гейт)
+    tromso_n: int = 24              # сколько последних снимков брать (0 — не проверять)
+    tromso_active: float = 0.05     # целевая доля активных пикселей при растеризации снимков (pyon.tromso)
 
 
 def decode_oblique(df: pd.DataFrame, component: str, workers: int, seed: int = 0, fixed_d=None, batch: int = 128):
@@ -93,6 +100,56 @@ def decode_oblique(df: pd.DataFrame, component: str, workers: int, seed: int = 0
     dl = DataLoader(ds, batch_size=batch, shuffle=False, num_workers=workers)
     ys, ds_, m1, m2 = zip(*[b for b in dl])
     return torch.cat(ys), torch.cat(ds_), torch.cat(m1), torch.cat(m2)
+
+
+@torch.no_grad()
+def render_input(ren, mh2f2, yo: torch.Tensor, yx: torch.Tensor | None, mode: str = "ox") -> torch.Tensor:
+    """Вход НЗ-модели [B,2,H,W]: канал 0 — суммарная мощность (рендер O-следов + X-следы из рендера
+    X-маски, ограниченные расширенной X-маской), канал 1 — нули. Чирп-зонд не разделяет поляризаций:
+    на реальном снимке O- и X-следы лежат в одной картинке (`pyon.tromso` даёт тот же формат)."""
+    x = ren.sample(mh2f2[yo])[:, :1]
+    if mode == "ox" and yx is not None:
+        xx = ren.sample(mh2f2[yx])[:, :1]
+        reg = Fn.max_pool2d((yx > 0).float().unsqueeze(1), 5, stride=1, padding=2)
+        x = (x + xx * reg).clamp(max=1.0)
+    return torch.cat([x, torch.zeros_like(x)], 1)
+
+
+@torch.no_grad()
+def tromso_probe(net, dev, cfg, vocab=None, do_gate: bool = False) -> dict:
+    """Контроль на РЕАЛЬНЫХ НЗ Тромсё без меток (Э3 §4 п.4; критерий ранней остановки для E5, где
+    реальных меток нет — вывод E4 о деградации переноса с числом шагов): доля снимков с найденным F2,
+    медиана МПЧ 1F2 и её IQR, инвариант 2F2/1F2, доля SHACL-нарушений на реальных сценах."""
+    from pyon import tromso as tg
+    d = ROOT / "data" / "tromso" / cfg.tromso_route
+    files = sorted(d.glob("*.png"))[-cfg.tromso_n:] if cfg.tromso_n else []
+    if not files:
+        return {}
+    xs, cov = [], []
+    for fp in files:
+        try:
+            snr, f, r = tg.png_to_snr(fp, cfg.tromso_route)
+            x, cv = tg.rasterize(snr, f, r, "zero", cfg.tromso_active, None)
+            xs.append(x); cov.append(cv)
+        except Exception:
+            continue
+    if not xs:
+        return {}
+    X = torch.from_numpy(np.stack(xs)).float().div(255)
+    pm, _ = predict(net, X, dev)
+    pm = np.where(np.stack(cov), pm, 0).astype(pm.dtype)
+    f1, f2, pn = muf_readouts(pm)
+    m = {"real/n": len(xs), "real/has_F2_frac": float(np.isfinite(f1).mean()),
+         "real/muf1F2_med": float(np.nanmedian(f1)) if np.isfinite(f1).any() else np.nan,
+         "real/muf1F2_iqr": float(np.nanpercentile(f1, 75) - np.nanpercentile(f1, 25)) if np.isfinite(f1).sum() > 3 else np.nan,
+         "real/has_MH_frac": float(np.isfinite(f2).mean())}
+    ok = np.isfinite(f1) & np.isfinite(f2)
+    if ok.any():
+        m["real/inv_ratio_med"] = float(np.median(f2[ok] / f1[ok]))
+    if do_gate and vocab is not None:
+        rate, warn, _ = gates.gate_rate(pm, gates.oblique_scene, vocab, prefix="real_", procs=cfg.gate_procs, with_warnings=True)
+        m["real/gate_violations"], m["real/gate_warnings"] = rate, warn
+    return m
 
 
 def muf_readouts(pm: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -180,13 +237,19 @@ def train_oblique(cfg: ObliqueConfig) -> dict:
     log = tblog.TBLog(rundir, asdict(cfg) | prov)
     log.readme(f"""## {cfg.stage}/{cfg.run} — НЗ-модель на синтетике, вариант **{cfg.variant}**
 Вход: синтетическая НЗ-ионограмма 128×128 (2–24 МГц × 300–3200 км групповой путь) = маска ARTIST, пересчитанная сферическим секансом
-(D ∈ {{300, 800, 1500}} км, компонента {cfg.component}) и «озвученная» рендерером `{cfg.renderer}`; цель: классы F2/F1/E/Es/MH (кратник).
+(D ∈ {{300, 800, 1500}} км), «озвученная» рендерером `{cfg.renderer}`; режим входа **{cfg.input_mode}** ("ox" — суммарная мощность
+O + X в одном канале, как видит чирп-зонд; X-следы из fo²=fx(fx−fB) с поправкой высот E3b). Цель: классы O-следов F2/F1/E/Es/MH (кратник)
+— X-след для модели помеха, которую нужно не спутать с F2. Данные: {"шарды " + cfg.dataset if cfg.dataset else "синтез на лету из SAO"}.
 **SCALARS**: `1_train/*` — лоссы; `2_val/*` — IoU по классам, МПЧ 1F2/2F2 RMSE и медиана (МГц, против аналитических меток),
 inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономарчука МПЧ(2F2)/МПЧ(1F2) (должны совпадать), logic_total — нарушения физики;
 `3_gate/*` — SHACL-нарушения на инференсе (labels_violations — референс меток, ожидание 0).
 **TEXT**: `tables/strat` — по дальностям D; `tables/track` — суточные треки МПЧ(t) при D = {cfg.track_d:.0f} км; `tables/crosstest` — ВЗ-модель zero-shot на НЗ (должна быть много хуже).
 **IMAGES**: `images/fixed_set` — вход | метка | предсказание (фиксированный набор, по D); `track/*` — суточный ход МПЧ 1F2/2F2 (метки точки, модель линия).
-**HISTOGRAMS**: инвариант Пономарчука (предсказание vs метки). Полные числа — `metrics.csv`, `summary.json`; PNG — `png/`.""")
+**HISTOGRAMS**: инвариант Пономарчука (предсказание vs метки).
+**`real/*` — контроль на РЕАЛЬНЫХ НЗ Тромсё ({cfg.tromso_route}, последние {cfg.tromso_n} снимков, меток нет)**: has_F2_frac — доля снимков
+с найденным следом F2, muf1F2_med/iqr — медиана и разброс МПЧ (МГц), inv_ratio_med — инвариант 2F2/1F2, gate_violations — доля SHACL-нарушений
+на реальных сценах. Это единственный критерий переноса без меток (вывод E4: перенос рендер→реальное деградирует с числом шагов) — ранняя
+остановка по нему. Полные числа — `metrics.csv`, `summary.json`; PNG — `png/`.""")
     t_all = time.time()
     tc = training.TrainConfig(manifest=cfg.manifest, limit=cfg.limit, val_size=cfg.val_size)
     df, tr, va = training.load_split(tc)
@@ -194,21 +257,41 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
     ren.corr = tuple(int(v) for v in cfg.render_corr.split(","))
     mh2f2 = rnd.MH2F2.to(dev)
     t0 = time.time()
-    Yv, Dv, M1, M2 = decode_oblique(va, cfg.component, cfg.workers, seed=cfg.seed + 7)
+    tds = sampler = Yxv = None
+    if cfg.dataset:                                   # материализованный датасет (маски O и X + метки)
+        tds = loader.ObliqueShardDataset(ROOT / cfg.dataset, "train", cache=1)
+        vds = loader.ObliqueShardDataset(ROOT / cfg.dataset, "val", cache=1)
+        pick = np.unique(np.linspace(0, len(vds) - 1, min(cfg.val_size, len(vds))).round().astype(int))
+        pick = pick[np.argsort([vds.shard_of(int(i)) for i in pick], kind="stable")]      # по шардам: одна распаковка
+        items = [vds[int(i)] for i in pick]
+        Yv = torch.stack([a for a, _, _ in items]); Yxv = torch.stack([b for _, b, _ in items])
+        L = torch.stack([c for _, _, c in items]); M1, M2, Dv = L[:, 0], L[:, 4], L[:, 7]
+        src = f"{len(tds)} масок (шарды {cfg.dataset})"
+    else:
+        Yv, Dv, M1, M2 = decode_oblique(va, cfg.component, cfg.workers, seed=cfg.seed + 7)
+        src = f"{len(tr)} SAO (синтез на лету)"
     torch.manual_seed(cfg.seed + 1)
-    Xv = torch.cat([ren.sample(mh2f2[Yv[k:k + 128].to(dev).long()]).cpu() for k in range(0, len(Yv), 128)]) if len(Yv) else torch.zeros(0)
-    print(f"[{cfg.stage}/{cfg.run}] train {len(tr)} SAO, val {len(Yv)} (D: {np.unique(Dv.numpy()).tolist()}), "
-          f"рендер val за {time.time() - t0:.0f} с; устройство {dev}", flush=True)
-    dl = DataLoader(loader.ObliqueDataset(tr, component=cfg.component, seed=cfg.seed), batch_size=cfg.batch, shuffle=True,
-                    num_workers=cfg.workers, persistent_workers=cfg.workers > 0, prefetch_factor=4 if cfg.workers > 0 else None)
+    Xv = torch.cat([render_input(ren, mh2f2, Yv[k:k + 128].to(dev).long(),
+                                 Yxv[k:k + 128].to(dev).long() if Yxv is not None else None, cfg.input_mode).cpu()
+                    for k in range(0, len(Yv), 128)]) if len(Yv) else torch.zeros(0)
+    print(f"[{cfg.stage}/{cfg.run}] train {src}, val {len(Yv)} (D: {np.unique(Dv.numpy()).tolist()}), "
+          f"вход {cfg.input_mode}, рендер val за {time.time() - t0:.0f} с; устройство {dev}", flush=True)
+    if tds is not None:
+        sampler = loader.ShardSampler(tds, seed=cfg.seed)
+        dl = DataLoader(tds, batch_size=cfg.batch, sampler=sampler, num_workers=cfg.workers, drop_last=True,
+                        persistent_workers=cfg.workers > 0, prefetch_factor=4 if cfg.workers > 0 else None)
+    else:
+        dl = DataLoader(loader.ObliqueDataset(tr, component=cfg.component, seed=cfg.seed), batch_size=cfg.batch, shuffle=True,
+                        num_workers=cfg.workers, persistent_workers=cfg.workers > 0, prefetch_factor=4 if cfg.workers > 0 else None)
     lset = training.select_logging_set(df[df.split == "val"], ROOT / "runs" / "E1" / "logging_set.json") \
         if (ROOT / "runs" / "E1" / "logging_set.json").exists() else \
         training.select_logging_set(df[df.split == "val"], ROOT / "runs" / cfg.stage / "logging_set.json")
     day_sets = []
     for d in lset["days"]:
         rows = df[(df.station == d["station"]) & (pd.to_datetime(df.time).dt.date.astype(str) == d["date"])].sort_values("time").reset_index(drop=True)
-        Yd, _, m1d, m2d = decode_oblique(rows, cfg.component, min(cfg.workers, 2), fixed_d=cfg.track_d)
-        day_sets.append((d, rows, Yd, m1d.numpy(), m2d.numpy()))
+        Yd, _, m1d, m2d = decode_oblique(rows, "O", min(cfg.workers, 2), fixed_d=cfg.track_d)
+        Yxd = decode_oblique(rows, "X", min(cfg.workers, 2), fixed_d=cfg.track_d)[0] if cfg.input_mode == "ox" else None
+        day_sets.append((d, rows, Yd, Yxd, m1d.numpy(), m2d.numpy()))
     Yi, Di = Yv[:cfg.log_images], Dv[:cfg.log_images]
     print(f"  панелей {len(Yi)}, суток-треков {len(day_sets)} при D={cfg.track_d:.0f}", flush=True)
 
@@ -228,11 +311,14 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
     best = dict(value=float("inf"), epoch=-1); hist = []
     for ep in range(cfg.epochs):
         net.train(); t_ep = time.time(); n_seen = 0; sums = {"CE": 0.0, "logic": 0.0}
-        for step, (y, d, _, _) in enumerate(dl):
+        if sampler is not None:
+            sampler.set_epoch(ep)
+        for step, batch in enumerate(dl):
             if (cfg.max_steps and step >= cfg.max_steps) or (cfg.steps_per_epoch and step >= cfg.steps_per_epoch):
                 break
-            y = y.to(dev).long()
-            x = ren.sample(mh2f2[y])
+            y = batch[0].to(dev).long()
+            yx = batch[1].to(dev).long() if tds is not None else None
+            x = render_input(ren, mh2f2, y, yx, cfg.input_mode)
             with torch.autocast("cuda", enabled=scaler.is_enabled()):
                 lg = net(x); loss_ce = ce(lg, y)
             loss = loss_ce
@@ -253,16 +339,20 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         t_ev = time.time()
         mv, pm, rt = evaluate(net, Xv, Yv, Dv, M1, M2, dev, cfg, vocab, ep, log, ref_gate, vz_net)
         m.update(mv)
+        if cfg.tromso_n:                                  # реальные НЗ Тромсё без меток — критерий переноса
+            m.update(tromso_probe(net, dev, cfg, vocab, do_gate=(ep % cfg.gate_every == 0 or ep == cfg.epochs - 1)))
         if len(Yi) and (ep % cfg.images_every == 0 or ep == cfg.epochs - 1):
             (rundir / "png").mkdir(exist_ok=True)
             log.ionograms("images/fixed_set", Xv[:len(Yi)].numpy(), Yi.numpy(), pm[:len(Yi)], ep, extent=EXTENT,
                           titles=[f"D={float(d):.0f}" for d in Di], xlabel="МГц", ylabel="P′, км",
                           save=rundir / "png" / f"ionograms_ep{ep:02d}.png")
-        for d, rows, Yd, m1d, m2d in day_sets:
+        for d, rows, Yd, Yxd, m1d, m2d in day_sets:
             if not len(Yd):
                 continue
             with torch.no_grad():
-                Xd = torch.cat([ren.sample(mh2f2[Yd[k:k + 128].to(dev).long()]).cpu() for k in range(0, len(Yd), 128)])
+                Xd = torch.cat([render_input(ren, mh2f2, Yd[k:k + 128].to(dev).long(),
+                                             Yxd[k:k + 128].to(dev).long() if Yxd is not None else None, cfg.input_mode).cpu()
+                                for k in range(0, len(Yd), 128)])
             pmd, _ = predict(net, Xd, dev)
             f1, f2, _ = muf_readouts(pmd)
             key = f"{d['station']}_{d['date']}_{d['kind']}"
@@ -281,7 +371,9 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         print(f"  ep{ep}: train CE {m['train/CE']:.3f}" + (f" logic {m['train/logic']:.4f}" if variant else "")
               + f" | L_hinge {m['val/logic_total']:.4f} IoU F2 {m.get('val/IoU_F2', np.nan):.3f} MH {m.get('val/IoU_MH', np.nan):.3f} "
               f"МПЧ1F2 RMSE {m.get('val/MUF1F2_rmse', np.nan):.2f} med {m.get('val/MUF1F2_med', np.nan):.2f} "
-              f"МПЧ2F2 RMSE {m.get('val/MUF2F2_rmse', np.nan):.2f} inv {m.get('val/inv_ratio_pred_med', np.nan):.3f}/{m.get('val/inv_ratio_label_med', np.nan):.3f} "
+              + (f"| РЕАЛ F2 {100 * m['real/has_F2_frac']:.0f}% МПЧ {m.get('real/muf1F2_med', np.nan):.2f}±{m.get('real/muf1F2_iqr', np.nan):.2f} "
+                 f"гейт {100 * m.get('real/gate_violations', np.nan):.0f}% " if "real/has_F2_frac" in m else "")
+              + f"МПЧ2F2 RMSE {m.get('val/MUF2F2_rmse', np.nan):.2f} inv {m.get('val/inv_ratio_pred_med', np.nan):.3f}/{m.get('val/inv_ratio_label_med', np.nan):.3f} "
               f"gate {m.get('gate/violations', np.nan):.0%} (метки {m.get('gate/labels_violations', np.nan):.0%}) | {t_train:.0f}+{m['time/eval_s']:.0f} с, "
               f"{m['time/train_samples_per_s']:.0f} обр/с", flush=True)
     rt.to_csv(rundir / "val_readouts.csv", index=False)
