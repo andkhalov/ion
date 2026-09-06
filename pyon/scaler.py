@@ -71,6 +71,22 @@ def profile_peaks(fp: np.ndarray, h_axis=canon.h_axis):
     return dict(hmF2=float(h_axis[im]), fpmax=float(fp[im]), peaks=peaks)
 
 
+def h_reach(fp: np.ndarray, f: float, h_axis=canon.h_axis) -> float:
+    """Первая высота, где профиль fp(h) достигает частоты f (линейная интерполяция между узлами);
+    NaN, если профиль не дотягивает до f."""
+    ok = np.flatnonzero(np.isfinite(fp))
+    if len(ok) < 2:
+        return float("nan")
+    v, h = fp[ok], h_axis[ok]
+    above = np.flatnonzero(v >= f)
+    if not len(above):
+        return float("nan")
+    j = above[0]
+    if j == 0 or v[j] == v[j - 1]:
+        return float(h[j])
+    return float(h[j - 1] + (h[j] - h[j - 1]) * (f - v[j - 1]) / (v[j] - v[j - 1]))
+
+
 def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 1.3,
                    distances=MUF_DISTANCES, k_muf: float = K_MUF, hm_f2: float = float("nan")) -> dict:
     """Маска [NH, NF] классов canon.CLASSES (+ профиль fp(h) [NH], NaN вне валидности; + hmF2 прямой
@@ -106,11 +122,13 @@ def scale_vertical(pm: np.ndarray, prof: np.ndarray | None = None, f_b: float = 
             r[f"MUF{D}"] = float("nan")
         r["M3000F2"] = float("nan")
     if prof is not None:
-        pk = profile_peaks(np.asarray(prof, float))
+        fp = np.asarray(prof, float)
+        pk = profile_peaks(fp)
         r["hmF2"] = float(hm_f2) if np.isfinite(hm_f2) else pk["hmF2"]; r["NmF2_fp"] = pk["fpmax"]
-        lower = [h for h, v in pk["peaks"]]
-        r["hmF1"] = float(lower[-1]) if len(lower) >= 1 and np.isfinite(r["foF1"]) else float("nan")
-        r["hmE"] = float(lower[0]) if len(lower) >= 1 and np.isfinite(r["foE"]) else float("nan")
+        # hmF1/hmE — высота, где fp(h) впервые достигает foF1/foE (F1 — уступ, а не пик профиля: поиск
+        # локальных максимумов давал hmF1 ≈ hmE ≈ 100 км против 165–180 у ARTIST; панели E1 2026-09-06)
+        r["hmF1"] = h_reach(fp, r["foF1"]) if np.isfinite(r["foF1"]) else float("nan")
+        r["hmE"] = h_reach(fp, r["foE"]) if np.isfinite(r["foE"]) else float("nan")
     else:
         r["hmF2"] = r["hmF1"] = r["hmE"] = r["NmF2_fp"] = float("nan")
     return r
