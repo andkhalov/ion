@@ -267,9 +267,16 @@ def train_renderer(cfg: RenderConfig) -> dict:
     return summary
 
 
-def load_renderer(path: str | Path, dev="cuda") -> Renderer:
+def load_renderer(path: str | Path, dev="cuda"):
+    """Загрузка рендерера любой версии: v1 (`Renderer`) или v2 GAN (`gan.Generator`, kind="gan") — общий
+    интерфейс `sample(mask) → [B,2,H,W]`."""
     ck = torch.load(path, map_location=dev)
     c = ck["cfg"]
+    if ck.get("kind") == "gan":
+        from pyon.gan import Generator
+        g = Generator(base=c.get("base", 48), depth=c.get("depth", 4), zdim=c.get("zdim", 128)).to(dev)
+        g.load_state_dict(ck["state_dict"]); g.eval()
+        return g
     net = Renderer(c.get("base", 16), c.get("depth", 3), pos_weight=c.get("pos_weight", 8.0),
                    hetero=c.get("hetero", False), col_noise=c.get("col_noise", False)).to(dev)   # старые чекпойнты: L1/без z_col
     net.load_state_dict(ck["state_dict"]); net.eval()
