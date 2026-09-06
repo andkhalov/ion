@@ -104,7 +104,8 @@ def test_oblique_masks_from_sao(sao_ji):
         assert lab["muf_F2"] == pytest.approx(obs.muf(sao_ji["F2o_freq"], sao_ji["F2o_vh"], d))
     yx, labx = obs.oblique_masks_from_sao(sao_ji, 800.0, "X")             # у ARTIST X-полилиний нет → X из O (fo²=fx(fx−fB), E3b)
     assert (yx == obs.OB_CLASSES.index("F2")).any() and (yx == obs.OB_CLASSES.index("MH")).any()
-    assert 0.2 < labx["muf_F2"] - lab["muf_F2"] < 1.5 and labx["muf_MH"] <= labx["muf_F2"]   # X выше O примерно на fB/2·sec; S1
+    _, lab800 = obs.oblique_masks_from_sao(sao_ji, 800.0, "O")
+    assert 0.2 < labx["muf_F2"] - lab800["muf_F2"] < 1.5 and labx["muf_MH"] <= labx["muf_F2"]   # X выше O примерно на fB/2·sec; S1
     fx, hx = obs.x_trace_from_o(sao_ji["F2o_freq"], sao_ji["F2o_vh"], 0.8, sao_ji["profile_h"], sao_ji["profile_fp"])
     fx0, hx0 = obs.x_trace_from_o(sao_ji["F2o_freq"], sao_ji["F2o_vh"], 0.8)
     assert np.allclose(fx, fx0) and np.nanmax(np.abs(hx - hx0)) < 80 and np.nanmedian(np.abs(hx - hx0)) > 0   # E3b: поправка есть и разумна
