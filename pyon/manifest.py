@@ -134,8 +134,11 @@ def _row(f: str):
         return None
 
 
-def build_manifest(procs: int = 8, limit: int = 0) -> pd.DataFrame:
+def build_manifest(procs: int = 8, limit: int = 0, include: str = "") -> pd.DataFrame:
+    """include — подстрока пути (напр. "JR055/2020"): отдельный манифест станция-года для внешнего теста."""
     files = collect_files()
+    if include:
+        files = [f for f in files if include in f]
     if limit:
         files = files[:limit]
     print(f"файлов: {len(files)}; процессов: {procs}", flush=True)
@@ -171,9 +174,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--procs", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--include", default="", help="подстрока пути, напр. JR055/2020 — манифест одного станция-года")
+    ap.add_argument("--out", default="", help="файл вывода (по умолчанию data/manifest.csv | manifest_smoke.csv | manifest_<include>.csv)")
     args = ap.parse_args()
-    df = build_manifest(args.procs, args.limit)
-    out = ROOT / ("data/manifest_smoke.csv" if args.limit else "data/manifest.csv")
+    df = build_manifest(args.procs, args.limit, args.include)
+    out = ROOT / (args.out or ("data/manifest_smoke.csv" if args.limit else
+                              f"data/manifest_{args.include.replace('/', '_')}.csv" if args.include else "data/manifest.csv"))
     df.to_csv(out, index=False)
     print("->", out, flush=True)
 
