@@ -97,18 +97,20 @@ def _check(args):
     scene_kind, pm, name, gyro = args
     scene = vertical_scene(pm, name, gyro if gyro else 1.3) if scene_kind == "vertical" else oblique_scene(pm, name)
     r = vd.validate_scene(scene, _VOCAB, verbose=False)
-    return bool(r["violations"]), bool(r["warnings"])
+    return bool(r["violations"]), bool(r["warnings"]), tuple(sorted(set(map(str, r["violations"]))))
 
 
 def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g", procs: int = 1,
-              with_warnings: bool = False, gyros=None):
+              with_warnings: bool = False, gyros=None, with_details: bool = False):
     """Доля масок, чья сцена даёт sh:Violation, и флаги по маскам (True = нарушение);
     with_warnings=True → (доля нарушений, доля предупреждений sh:Warning, флаги нарушений) —
-    Э3 §3.3 требует долю предупреждений отдельно. procs > 1 — пул процессов (каждый грузит словарь
-    один раз): ~1.4 с/сцену на ядро (owlrl-замыкание + 3 прогона pyshacl), на 4 ядрах ×2.3."""
+    Э3 §3.3 требует долю предупреждений отдельно; with_details=True добавляет 4-й элемент — список
+    кортежей нарушенных форм по маскам (E2: разбор отбраковок). procs > 1 — пул процессов (каждый
+    грузит словарь один раз): ~1.4 с/сцену на ядро (owlrl-замыкание + 3 прогона pyshacl), на 4 ядрах ×2.3."""
     masks = list(masks)
     if not masks:
-        return (float("nan"), float("nan"), []) if with_warnings else (float("nan"), [])
+        empty = (float("nan"), float("nan"), []) if with_warnings else (float("nan"), [])
+        return empty + ([],) if with_details else empty
     kind = "vertical" if scene_fn is vertical_scene else "oblique"
     gyros = list(gyros) if gyros is not None else [None] * len(masks)   # гирочастота станции для V4
     jobs = [(kind, pm, f"{prefix}{k}", gyros[k]) for k, pm in enumerate(masks)]
@@ -120,7 +122,6 @@ def gate_rate(masks, scene_fn, vocab: Graph | None = None, prefix: str = "g", pr
         global _VOCAB
         _VOCAB = vocab if vocab is not None else (_VOCAB or vd.load_vocabulary())
         res = [_check(j) for j in jobs]
-    viol = [v for v, _ in res]; warn = [w for _, w in res]
-    if with_warnings:
-        return sum(viol) / len(viol), sum(warn) / len(warn), viol
-    return sum(viol) / len(viol), viol
+    viol = [v for v, _, _ in res]; warn = [w for _, w, _ in res]; det = [d for _, _, d in res]
+    out = (sum(viol) / len(viol), sum(warn) / len(warn), viol) if with_warnings else (sum(viol) / len(viol), viol)
+    return out + (det,) if with_details else out
