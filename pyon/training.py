@@ -177,7 +177,11 @@ def transplant(x_real: torch.Tensor, x_render: torch.Tensor, y: torch.Tensor, mo
     снаружи — реальное сырьё того же образца ("own") или другого образца батча ("shuffle")."""
     k = 2 * dilate + 1
     region = torch.nn.functional.max_pool2d((y > 0).float().unsqueeze(1), k, stride=1, padding=dilate) > 0
-    bg = x_real if mode == "own" else x_real[torch.randperm(len(x_real), device=x_real.device)]
+    if mode == "own":
+        bg = x_real
+    else:                                   # донор: его собственные размеченные следы вырезаем (иначе учим их игнорировать)
+        perm = torch.randperm(len(x_real), device=x_real.device)
+        bg = x_real[perm] * (~region[perm]).float()
     return torch.where(region, x_render, bg)
 
 
