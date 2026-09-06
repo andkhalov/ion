@@ -26,6 +26,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -109,7 +110,7 @@ def load_shard(path: Path):
     return z["masks_o"], z["masks_x"], z["labels"], z["idx"]
 
 
-def gallery(renderer: str, n: int = 24, seed: int = 0):
+def gallery(renderer: str, n: int = 24, seed: int = 0, bg_shift: bool = True):
     """Галерея готовых образцов: маска O | маска X | рендер (O + X, как видит чирп-зонд) | рендер O."""
     import torch, matplotlib
     matplotlib.use("Agg"); import matplotlib.pyplot as plt
@@ -117,48 +118,48 @@ def gallery(renderer: str, n: int = 24, seed: int = 0):
     from pyon import renderer as rnd, tblog
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     ren = rnd.load_renderer(ROOT / renderer, dev); mh2f2 = rnd.MH2F2.to(dev)
-    meta = pd.read_csv(OUT / "meta.csv")
+    meta = pd.read_csv(OUT / "meta.csv").set_index("idx")
     rng = np.random.default_rng(seed)
-    pick = meta[meta.split == "val"].sample(n, random_state=seed)
     shards = sorted(OUT.glob("val_*.npz"))
-    cache = {}
-    def get(mi):
-        for sp in shards:
-            if sp not in cache:
-                cache[sp] = load_shard(sp)
-            mo, mx, lab, idx = cache[sp]
-            j = np.flatnonzero(idx == mi)
-            if len(j):
-                return mo[j[0]], mx[j[0]], lab[j[0]]
-        raise KeyError(mi)
+    sel = rng.choice(len(shards), size=min(3, len(shards)), replace=False)     # 2-3 шарда: не тянем весь датасет в RAM
+    items = []
+    for sp in [shards[k] for k in sel]:
+        mo, mx, lab, idx = load_shard(sp)
+        has = np.flatnonzero((mo > 0).any((1, 2)))                             # только непустые маски
+        for j in rng.choice(has, size=min(n // len(sel) + 1, len(has)), replace=False):
+            items.append((mo[j], mx[j], lab[j], int(idx[j])))
+    items = items[:n]
+    pick = pd.DataFrame([dict(idx=i, **meta.loc[i].to_dict()) for _, _, _, i in items])
     (OUT / "gallery").mkdir(exist_ok=True)
     cmap = ListedColormap(tblog.MASK_COLORS)
     ext = (obs.FOB_MIN, obs.FOB_MAX, obs.P_MIN, obs.P_MAX)
     fig, ax = plt.subplots(n, 4, figsize=(14, 2.6 * n), squeeze=False)
     torch.manual_seed(seed)
-    for r, (_, m) in enumerate(pick.iterrows()):
-        mo, mx, lab = get(int(m.idx))
-        xo, xx = render_ox(ren, mh2f2, torch.from_numpy(mo)[None].to(dev).long(), torch.from_numpy(mx)[None].to(dev).long())
+    YO = torch.from_numpy(np.stack([a_ for a_, _, _, _ in items])).to(dev).long()
+    YX = torch.from_numpy(np.stack([b_ for _, b_, _, _ in items])).to(dev).long()
+    X1 = render_ox(ren, mh2f2, YO, YX, bg_shift)[0]                     # весь набор одним батчем (донорский фон)
+    X2 = render_ox(ren, mh2f2, YO, YX, bg_shift)[0]                     # вторая независимая реализация
+    for r, ((mo, mx, lab, _), (_, m)) in enumerate(zip(items, pick.iterrows())):
+        xo, xx = X1[r:r + 1], X2[r:r + 1]
         panels = [(mo, cmap, dict(vmin=0, vmax=len(tblog.MASK_COLORS) - 1)), (mx, cmap, dict(vmin=0, vmax=len(tblog.MASK_COLORS) - 1)),
-                  ((xo + xx).clip(0, 1)[0, 0].cpu().numpy(), "inferno", dict(vmin=0, vmax=1)), (xo[0, 0].cpu().numpy(), "inferno", dict(vmin=0, vmax=1))]
+                  (xo[0, 0].cpu().numpy(), "inferno", dict(vmin=0, vmax=1)), (xx[0, 0].cpu().numpy(), "inferno", dict(vmin=0, vmax=1))]
         for c, (img, cm, kw) in enumerate(panels):
             a = ax[r, c]; a.imshow(img, origin="lower", cmap=cm, aspect="auto", extent=ext, interpolation="nearest", **kw)
             if r == 0:
-                a.set_title(["маска O", "маска X (E3b)", "рендер O+X (вход НЗ-модели)", "рендер O"][c], fontsize=9)
+                a.set_title(["маска O", "маска X (E3b)", "вход НЗ-модели (O+X+шум)", "он же, другая реализация"][c], fontsize=9)
             a.tick_params(labelsize=6)
         ax[r, 0].set_ylabel(f"{m.station} {str(m.time)[:16]}\nD={m.D_km:.0f} МПЧ {lab[0]:.1f}/{lab[4]:.1f}", fontsize=6)
-    fig.tight_layout(); fig.savefig(OUT / "gallery" / f"gallery_{Path(renderer).parent.name}.png", dpi=80); plt.close(fig)
-    print("галерея →", OUT / "gallery" / f"gallery_{Path(renderer).parent.name}.png")
+    name = f"gallery_{Path(renderer).parent.name}{'' if bg_shift else '_nobgshift'}.png"
+    fig.tight_layout(); fig.savefig(OUT / "gallery" / name, dpi=80); plt.close(fig)
+    print("галерея →", OUT / "gallery" / name)
 
 
-def render_ox(ren, mh2f2, mo, mx):
-    """Рендер входа НЗ-модели: O-канал рендера маски O (фон + O-следы) + X-следы (пиксели расширенной
-    маски X из рендера маски X). Возвращает (x_o [B,2,H,W], x_add [B,2,H,W]) — второй суммируется с первым."""
-    import torch, torch.nn.functional as Fn
-    xo = ren.sample(mh2f2[mo])
-    xx = ren.sample(mh2f2[mx])
-    reg = Fn.max_pool2d((mx > 0).float().unsqueeze(1), 5, stride=1, padding=2)
-    return xo, xx * reg
+def render_ox(ren, mh2f2, mo, mx, bg_shift: bool = True):
+    """Вход НЗ-модели ровно как в обучении (`oblique_train.render_input`): O-следы + X-следы + фон
+    из отдельного рендера пустой маски со случайным сдвигом по частоте. Возвращает (x [B,2,H,W], 0)."""
+    from pyon.oblique_train import render_input
+    x = render_input(ren, mh2f2, mo, mx, "ox", bg_shift)
+    return x, torch.zeros_like(x)
 
 
 def main():
@@ -169,11 +170,12 @@ def main():
     ap.add_argument("--gallery", type=int, default=0, help="число образцов галереи (0 — не строить)")
     ap.add_argument("--renderer", default="runs/E4/gan/weights.pt")
     ap.add_argument("--no-build", action="store_true", help="только галерея")
+    ap.add_argument("--bg_shift", action=argparse.BooleanOptionalAction, default=True)
     a = ap.parse_args()
     if not a.no_build:
         build(a.manifest, a.procs, a.limit)
     if a.gallery:
-        gallery(a.renderer, a.gallery)
+        gallery(a.renderer, a.gallery, bg_shift=a.bg_shift)
 
 
 if __name__ == "__main__":

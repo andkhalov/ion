@@ -89,6 +89,13 @@ class ObliqueConfig:
     tromso_route: str = "sgo-tgo"   # контроль на РЕАЛЬНЫХ НЗ каждый eval (без меток: доля найденных F2, МПЧ, гейт)
     tromso_n: int = 24              # сколько последних снимков брать (0 — не проверять)
     tromso_active: float = 0.05     # целевая доля активных пикселей при растеризации снимков (pyon.tromso)
+    cover: float = 0.7              # доля образцов со случайным ОКНОМ ПОКРЫТИЯ (вне окна нули — как на
+                                    # реальном снимке, где поле уже нашей решётки)
+    density: str = "0.03,0.18"      # случайная целевая доля активных пикселей: синтетика проходит ТУ ЖЕ
+                                    # нормировку, что реальные снимки (порог по квантилю); "" — выключить
+    bg_shift: bool = True           # фон вне следов — из отдельного рендера пустой маски со случайным
+                                    # сдвигом по частоте (рендерер обучен на ВЗ-сетке, полосы иначе стоят
+                                    # в тех же столбцах = на бессмысленных для НЗ частотах)
 
 
 def decode_oblique(df: pd.DataFrame, component: str, workers: int, seed: int = 0, fixed_d=None, batch: int = 128):
@@ -102,16 +109,68 @@ def decode_oblique(df: pd.DataFrame, component: str, workers: int, seed: int = 0
     return torch.cat(ys), torch.cat(ds_), torch.cat(m1), torch.cat(m2)
 
 
+def _dens(cfg):
+    return tuple(float(v) for v in cfg.density.split(",")) if cfg.density else None
+
+
 @torch.no_grad()
-def render_input(ren, mh2f2, yo: torch.Tensor, yx: torch.Tensor | None, mode: str = "ox") -> torch.Tensor:
+def render_input(ren, mh2f2, yo: torch.Tensor, yx: torch.Tensor | None, mode: str = "ox",
+                 bg_shift: bool = True, cover: float = 0.7, density=(0.03, 0.18)) -> torch.Tensor:
     """Вход НЗ-модели [B,2,H,W]: канал 0 — суммарная мощность (рендер O-следов + X-следы из рендера
     X-маски, ограниченные расширенной X-маской), канал 1 — нули. Чирп-зонд не разделяет поляризаций:
-    на реальном снимке O- и X-следы лежат в одной картинке (`pyon.tromso` даёт тот же формат)."""
+    на реальном снимке O- и X-следы лежат в одной картинке (`pyon.tromso` даёт тот же формат).
+
+    bg_shift: фон вне расширенной маски следов берётся у ДОНОРА (другого образца того же батча),
+    циклически сдвинутого по частоте на случайную величину; след донора закрывается собственным
+    фоном. Зачем: рендерер обучен на ВЗ-сетке (1–15 МГц), НЗ-сетка другая (2–24 МГц) — без сдвига
+    помеховые полосы садятся в те же СТОЛБЦЫ, то есть на фиксированные и бессмысленные для НЗ
+    частоты (галерея датасета 2026-09-06). Фон донора берётся из ТОГО ЖЕ рендерера, поэтому
+    текстурного шва нет (в отличие от трансплантации РЕАЛЬНОГО фона, опровергнутой в E4).
+    Пустая маска на роль фона не годится: рендерер выучил, что «нет разметки ARTIST» = возмущённая
+    сильно зашумлённая ионограмма, и рисует именно её."""
     x = ren.sample(mh2f2[yo])[:, :1]
     if mode == "ox" and yx is not None:
         xx = ren.sample(mh2f2[yx])[:, :1]
-        reg = Fn.max_pool2d((yx > 0).float().unsqueeze(1), 5, stride=1, padding=2)
-        x = (x + xx * reg).clamp(max=1.0)
+        reg_x = Fn.max_pool2d((yx > 0).float().unsqueeze(1), 5, stride=1, padding=2)
+        x = (x + xx * reg_x).clamp(max=1.0)
+    m = (yo > 0) | (yx > 0) if yx is not None else (yo > 0)
+    reg = Fn.max_pool2d(m.float().unsqueeze(1), 7, stride=1, padding=3) > 0
+    if cover > 0:
+        # ОКНО ПОКРЫТИЯ: реальный НЗ-снимок покрывает лишь часть нашей решётки (SGO→TGO: 2–16 МГц ×
+        # 300–1500 км; Juliusruh→TGO: 2–14 МГц × 1500–3200 км), вне окна данных нет — нули. Синтетика
+        # без окна заполняет всё поле: доля активных 15 % против 1 % у реального (сравнение 2026-09-06).
+        # Окно применяется к образцу, только если след целиком в него попадает (иначе метка требовала бы
+        # угадать невидимое).
+        B, _, H, W = x.shape
+        take = torch.rand(B, device=x.device) < cover
+        f_hi = torch.randint(int(0.45 * W), W + 1, (B,), device=x.device)      # верхняя частота окна
+        p_hi = torch.randint(int(0.35 * H), H + 1, (H and B,), device=x.device)  # верхний групповой путь
+        cols = torch.arange(W, device=x.device).view(1, 1, 1, W)
+        rows = torch.arange(H, device=x.device).view(1, 1, H, 1)
+        win = (cols < f_hi.view(B, 1, 1, 1)) & (rows < p_hi.view(B, 1, 1, 1))
+        fits = (m.unsqueeze(1) & ~win).flatten(1).sum(1) == 0                   # след целиком внутри окна
+        win = win | (~(take & fits)).view(B, 1, 1, 1)
+        x = x * win.float()
+    if bg_shift and len(x) > 1:
+        k = int(torch.randint(0, x.shape[-1], (1,)).item())
+        donor = torch.roll(torch.roll(x, 1, 0), shifts=k, dims=-1)          # сосед по батчу, сдвиг по частоте
+        donor_reg = torch.roll(torch.roll(reg, 1, 0), shifts=k, dims=-1)
+        donor = torch.where(donor_reg, x, donor)                            # след донора закрываем своим фоном
+        x = torch.where(reg, x, donor)
+    if density is not None:
+        # ТА ЖЕ нормировка, что у реальных снимков (`tromso.rasterize`): порог по квантилю (1 − a) с
+        # СЛУЧАЙНОЙ целевой долей активных a, растяжение по 99.9-му перцентилю. Так train и test
+        # проходят один оператор, а модель не привязывается к плотности помех домена дигизонда
+        # (у чирп-зонда Тромсё поле заметно чище: сравнение 2026-09-06).
+        B = x.shape[0]
+        n_win = win.flatten(1).sum(1).float() if cover > 0 else torch.full((B,), float(x[0].numel()), device=x.device)
+        a = torch.empty(B, device=x.device).uniform_(density[0], density[1])
+        flat = x.flatten(1)
+        sv, _ = torch.sort(flat, dim=1, descending=True)
+        kth = (a * n_win).long().clamp(1, flat.shape[1] - 1)
+        thr = sv.gather(1, kth.unsqueeze(1))
+        top = sv[:, :max(1, flat.shape[1] // 1000)].mean(1, keepdim=True)
+        x = ((x - thr.view(B, 1, 1, 1)) / (top - thr).clamp(min=1e-3).view(B, 1, 1, 1)).clamp(0, 1)
     return torch.cat([x, torch.zeros_like(x)], 1)
 
 
@@ -272,7 +331,7 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         src = f"{len(tr)} SAO (синтез на лету)"
     torch.manual_seed(cfg.seed + 1)
     Xv = torch.cat([render_input(ren, mh2f2, Yv[k:k + 128].to(dev).long(),
-                                 Yxv[k:k + 128].to(dev).long() if Yxv is not None else None, cfg.input_mode).cpu()
+                                 Yxv[k:k + 128].to(dev).long() if Yxv is not None else None, cfg.input_mode, cfg.bg_shift, cfg.cover, _dens(cfg)).cpu()
                     for k in range(0, len(Yv), 128)]) if len(Yv) else torch.zeros(0)
     print(f"[{cfg.stage}/{cfg.run}] train {src}, val {len(Yv)} (D: {np.unique(Dv.numpy()).tolist()}), "
           f"вход {cfg.input_mode}, рендер val за {time.time() - t0:.0f} с; устройство {dev}", flush=True)
@@ -318,7 +377,7 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
                 break
             y = batch[0].to(dev).long()
             yx = batch[1].to(dev).long() if tds is not None else None
-            x = render_input(ren, mh2f2, y, yx, cfg.input_mode)
+            x = render_input(ren, mh2f2, y, yx, cfg.input_mode, cfg.bg_shift, cfg.cover, _dens(cfg))
             with torch.autocast("cuda", enabled=scaler.is_enabled()):
                 lg = net(x); loss_ce = ce(lg, y)
             loss = loss_ce
@@ -351,7 +410,7 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
                 continue
             with torch.no_grad():
                 Xd = torch.cat([render_input(ren, mh2f2, Yd[k:k + 128].to(dev).long(),
-                                             Yxd[k:k + 128].to(dev).long() if Yxd is not None else None, cfg.input_mode).cpu()
+                                             Yxd[k:k + 128].to(dev).long() if Yxd is not None else None, cfg.input_mode, cfg.bg_shift, cfg.cover, _dens(cfg)).cpu()
                                 for k in range(0, len(Yd), 128)])
             pmd, _ = predict(net, Xd, dev)
             f1, f2, _ = muf_readouts(pmd)
