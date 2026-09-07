@@ -91,6 +91,8 @@ class ObliqueConfig:
     tromso_active: float = 0.05     # целевая доля активных пикселей при растеризации снимков (pyon.tromso)
     cover: float = 0.7              # доля образцов со случайным ОКНОМ ПОКРЫТИЯ (вне окна нули — как на
                                     # реальном снимке, где поле уже нашей решётки)
+    best_by: str = "val"            # критерий лучшего чекпойнта: "val" — медиана |ΔМПЧ| на синтетике;
+                                    # "real" — гейт на реальных Тромсё минус 0.5·доля найденных F2 (без меток)
     density: str = "0.03,0.18"      # случайная целевая доля активных пикселей: синтетика проходит ТУ ЖЕ
                                     # нормировку, что реальные снимки (порог по квантилю); "" — выключить
     bg_shift: bool = True           # фон вне следов — из отдельного рендера пустой маски со случайным
@@ -424,7 +426,13 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         log.scalars({k: v for k, v in m.items() if k != "epoch"}, ep); log.row(m, ep); hist.append(m)
         ckpt = {"state_dict": net.state_dict(), "cfg": asdict(cfg), "epoch": ep, "metrics": m}
         torch.save(ckpt, rundir / "weights_last.pt")
-        crit = m.get("val/MUF1F2_med", np.nan)
+        if cfg.best_by == "real" and "real/gate_violations" in m:
+            # выбор чекпойнта по РЕАЛЬНЫМ снимкам без меток: меньше нарушений физики и больше найденных
+            # следов (смоук 2026-09-06: синтетические метрики стоят, реальные деградируют с эпохами —
+            # выбирать по синтетике значит выбрать переученную на рендер модель)
+            crit = m["real/gate_violations"] - 0.5 * m.get("real/has_F2_frac", 0.0)
+        else:
+            crit = m.get("val/MUF1F2_med", np.nan)
         if np.isfinite(crit) and crit < best["value"]:
             best = dict(value=float(crit), epoch=ep); torch.save(ckpt, rundir / "weights.pt")
         print(f"  ep{ep}: train CE {m['train/CE']:.3f}" + (f" logic {m['train/logic']:.4f}" if variant else "")
