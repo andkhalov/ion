@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt                                              # n
 from matplotlib.colors import ListedColormap                                 # noqa: E402
 
 from pyon import canon, tblog, training as T                                 # noqa: E402
+from pyon import oblique_scaler as osc                                       # noqa: E402
 from pyon import digi_formats as dfm                                          # noqa: E402
 from pyon import oblique_synth as obs                                         # noqa: E402
 from pyon import oblique_train as OT                                          # noqa: E402
@@ -58,10 +59,12 @@ def chain_board(log: tblog.TBLog, rows: pd.DataFrame, nz_net, ren, dev, d_km: fl
     cmap_ob = ListedColormap(tblog.MASK_COLORS[:len(obs.OB_CLASSES)])
     mh2f2 = rnd.MH2F2.to(dev)
     n = len(rows)
-    fig, ax = plt.subplots(n, 5, figsize=(21, 3.4 * n), squeeze=False)
+    fig, ax = plt.subplots(n, 6, figsize=(25, 3.4 * n), squeeze=False,
+                           gridspec_kw=dict(width_ratios=[1, 1, 1, 1, 1, 0.62]))
     titles = ["1. ВЗ: реальное сырьё + следы ARTIST", "2. ВЗ: разметка ARTIST (цель ВЗ-модели)",
               f"3. НЗ: аналитическая разметка (D={d_km:.0f} км, азимут {az:.0f}°)",
-              "4. НЗ: синтетический вход (рендер шума)", "5. НЗ: предсказание нашей модели"]
+              "4. НЗ: синтетический вход (рендер шума)", "5. НЗ: предсказание нашей модели",
+              "6. Интерпретация: метка | наша | Δ"]
     for r, row in enumerate(rows.itertuples()):
         x = dfm.read_canon(str(ROOT / row.path)).astype(np.float32) / 255.0
         sao = dfm.read_sao(str(ROOT / row.sao))
@@ -85,8 +88,24 @@ def chain_board(log: tblog.TBLog, rows: pd.DataFrame, nz_net, ren, dev, d_km: fl
         ax[r, 3].imshow(xin[0, 0].cpu().numpy(), origin="lower", extent=OB_EXT, aspect="auto", cmap="inferno", vmin=0, vmax=1, interpolation="nearest")
         ax[r, 4].imshow(pm, origin="lower", extent=OB_EXT, aspect="auto", cmap=cmap_ob, vmin=0, vmax=len(obs.OB_CLASSES) - 1, interpolation="nearest")
         ax[r, 0].set_ylabel(f"{row.station} {str(row.time)[:16]}\nfoF2 {row.foF2}  h′F {row.hF}", fontsize=7)
-        ax[r, 2].set_xlabel(f"метка МПЧ {lab_o.get('muf_F2', np.nan):.2f} / кратник {lab_o.get('muf_MH', np.nan):.2f} МГц", fontsize=7)
-        ax[r, 4].set_xlabel(f"наша МПЧ {f1[0]:.2f} / кратник {f2[0]:.2f} МГц", fontsize=7)
+        # таблица интерпретации: что мы СНИМАЕМ с разметки (аналог таблицы дигизонда, но для НЗ)
+        ours = osc.scale_oblique(pm, d_km)
+        lab_t = osc.table_from_labels(lab_o, None, d_km)
+        lab_t["h_экв"] = osc.scale_oblique(y_ob, d_km).get("h_экв", np.nan)      # эталон — с аналитической маски
+        for k in ("P1F2", "t1F2", "P2F2", "h_МПЧ", "fv1F2", "НПЧ", "Δf1F2"):
+            lab_t[k] = osc.scale_oblique(y_ob, d_km).get(k, np.nan)
+        axt = ax[r, 5]; axt.axis("off")
+        lines = [f"{'':9s}{'метка':>8s}{'наша':>8s}{'Δ':>7s}"]
+        for k in osc.OB_REPORT_ROWS:
+            a_, b_ = lab_t.get(k, np.nan), ours.get(k, np.nan)
+            fa = "   N/A" if not np.isfinite(a_) else f"{a_:6.2f}"
+            fb = "   N/A" if not np.isfinite(b_) else f"{b_:6.2f}"
+            fd = "" if not (np.isfinite(a_) and np.isfinite(b_)) else f"{b_ - a_:+6.2f}"
+            lines.append(f"{k:9s}{fa:>8s}{fb:>8s}{fd:>7s}")
+        lines.append("")
+        lines.append("МПЧ, НПЧ, ОРЧ, fv — МГц")
+        lines.append("P′, h — км;  t — мс")
+        axt.text(0, 1, "\n".join(lines), family="monospace", fontsize=7, va="top", ha="left", transform=axt.transAxes)
         for c in range(5):
             ax[r, c].tick_params(labelsize=6)
             if r == 0:
@@ -114,7 +133,9 @@ def tromso_board(log: tblog.TBLog, nz_net, dev, route: str, n: int, active: floa
     pm = np.where(np.stack(cov), pm, 0)
     f1, f2, pn = OT.muf_readouts(pm)
     m = len(xs)
-    fig, ax = plt.subplots(3, m, figsize=(3.4 * m, 10.2), squeeze=False)
+    route_d = {"sgo-tgo": 430.0, "juliusruh-tgo": 1500.0}.get(route, np.nan)
+    fig, ax = plt.subplots(4, m, figsize=(3.4 * m, 14.0), squeeze=False,
+                           gridspec_kw=dict(height_ratios=[1, 1, 1, 0.85]))
     for k in range(m):
         ax[0, k].imshow(X[k, 0].numpy(), origin="lower", extent=OB_EXT, aspect="auto", cmap="inferno", vmin=0, vmax=1, interpolation="nearest")
         ax[0, k].set_title(f"{tt[k][9:15]} UTC", fontsize=9)
@@ -126,11 +147,19 @@ def tromso_board(log: tblog.TBLog, nz_net, dev, route: str, n: int, active: floa
             if mask.any():
                 ax[2, k].contour(np.linspace(*OB_EXT[:2], obs.NF), np.linspace(*OB_EXT[2:], obs.NP), mask.astype(float),
                                  levels=[0.5], colors=[tblog.MASK_COLORS[ci]], linewidths=0.9)
+        axt = ax[3, k]; axt.axis("off")
+        ours = osc.scale_oblique(pm[k], route_d)
+        lines = [f"{'интерпретация':>13s}", ""]
+        for kk in osc.OB_REPORT_ROWS:
+            v = ours.get(kk, np.nan)
+            lines.append(f"{kk:9s}{'   N/A' if not np.isfinite(v) else f'{v:8.2f}'}")
+        axt.text(0.02, 1, "\n".join(lines), family="monospace", fontsize=7, va="top", ha="left", transform=axt.transAxes)
         for r_ in range(3):
             ax[r_, k].tick_params(labelsize=6)
     for r_, lab in enumerate(["реальный снимок Тромсё (наша растеризация)", "разметка нашей модели", "контуры поверх снимка"]):
         ax[r_, 0].set_ylabel(f"P′, км\n{lab}", fontsize=8)
-    fig.suptitle(f"Реальные наклонные ионограммы Тромсё, трасса {route}: что видит модель и как размечает", fontsize=11)
+    ax[3, 0].set_ylabel(f"таблица по разметке (D={route_d:.0f} км)", fontsize=8)
+    fig.suptitle(f"Реальные наклонные ионограммы Тромсё, трасса {route} (D={route_d:.0f} км): снимок, разметка, контуры и снятые характеристики", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.98)); fig.savefig(save, dpi=85); log.w.add_figure(f"tromso/{route}", fig, 0); plt.close(fig)
     print("→", save)
 
