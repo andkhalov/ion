@@ -270,11 +270,18 @@ def evaluate(net, Xv, Yv, Dv, M1, M2, dev, cfg, vocab, epoch, log, ref_gate: dic
         for k, v in st.items():
             m[f"val/{name}_{k}"] = v
     Dn = Dv.numpy()
-    for d in sorted(set(Dn.tolist())):
-        mk = Dn == d
-        st = training.err_stats(f1[mk], lab1[mk]); m[f"strat/D{int(d)}/MUF1F2_rmse"] = st.get("rmse", np.nan)
+    # дальности в датасете непрерывные (случайные 250–2000 км) — стратифицируем ПО БИНАМ, иначе групп
+    # столько же, сколько образцов (правка 2026-09-07)
+    edges = [0, 500, 1000, 1500, 1e9]
+    for k in range(len(edges) - 1):
+        mk = (Dn >= edges[k]) & (Dn < edges[k + 1])
+        if mk.sum() < 5:
+            continue
+        tag = f"D{edges[k]:.0f}_{edges[k+1]:.0f}" if edges[k + 1] < 1e8 else f"D{edges[k]:.0f}+"
+        st = training.err_stats(f1[mk], lab1[mk]); m[f"strat/{tag}/MUF1F2_rmse"] = st.get("rmse", np.nan)
+        m[f"strat/{tag}/n"] = int(mk.sum())
         inter = ((pm[mk] == iF2) & (Yn[mk] == iF2)).sum(); union = ((pm[mk] == iF2) | (Yn[mk] == iF2)).sum()
-        m[f"strat/D{int(d)}/IoU_F2"] = float(inter / union) if union else np.nan
+        m[f"strat/{tag}/IoU_F2"] = float(inter / union) if union else np.nan
     # инвариант Пономарчука: отношение МПЧ кратностей
     okl = np.isfinite(lab1) & np.isfinite(lab2); okp = np.isfinite(f1) & np.isfinite(f2)
     rl, rp = lab2[okl] / lab1[okl], f2[okp] / f1[okp]
@@ -356,7 +363,8 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
     Xv = torch.cat([render_input(ren, mh2f2, Yv[k:k + 128].to(dev).long(),
                                  Yxv[k:k + 128].to(dev).long() if Yxv is not None else None, cfg.input_mode, cfg.bg_shift, cfg.cover, _dens(cfg)).cpu()
                     for k in range(0, len(Yv), 128)]) if len(Yv) else torch.zeros(0)
-    print(f"[{cfg.stage}/{cfg.run}] train {src}, val {len(Yv)} (D: {np.unique(Dv.numpy()).tolist()}), "
+    print(f"[{cfg.stage}/{cfg.run}] train {src}, val {len(Yv)} (D: {Dv.numpy().min():.0f}…{Dv.numpy().max():.0f} км, "
+          f"{len(np.unique(Dv.numpy()))} значений), "
           f"вход {cfg.input_mode}, рендер val за {time.time() - t0:.0f} с; устройство {dev}", flush=True)
     if tds is not None:
         sampler = loader.ShardSampler(tds, seed=cfg.seed)
