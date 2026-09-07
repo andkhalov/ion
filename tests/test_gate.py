@@ -65,3 +65,20 @@ def test_empty_mask_scene_is_valid(vocab):
 def test_regression_suite_18(capsys):
     """Полный регрессионный набор онтологии (обязателен перед каждым full-прогоном)."""
     assert vd.regression()
+
+
+def test_oblique_repair_removes_false_es(vocab, sao_ji):
+    """Онтология на инференсе (НЗ): ложный Es с задержкой выше F2 нарушает S4, и ремонт его снимает.
+    Регресс на дефект 2026-09-07: в наборе кандидатов не было «снять Es» — единственного действия
+    под доминирующую форму S4, зато были холостые «снять F1»/«снять E» (НЗ-сцена их не строит)."""
+    from pyon import repair as rp
+    y, _ = obs.oblique_masks_from_sao(sao_ji, 800.0, "O")
+    iF2, iEs = obs.OB_CLASSES.index("F2"), obs.OB_CLASSES.index("Es")
+    rows, cols = np.nonzero(y == iF2)
+    bad = y.copy()
+    bad[rows.max() + 1:rows.max() + 4, cols.min():cols.min() + 10] = iEs   # Es ЗАДЕРЖАННЕЕ следа F2
+    assert vd.validate_scene(gates.oblique_scene(bad, "es"), vocab, verbose=False)["violations"]
+    fixed, act, was_bad = rp.repair(bad, "oblique", vocab, name="fix")
+    assert was_bad and act == ("drop", "Es") and not (fixed == iEs).any()
+    assert vd.validate_scene(gates.oblique_scene(fixed, "ok"), vocab, verbose=False)["violations"] == []
+    assert ("drop", "F1") not in rp.OB_CANDIDATES and ("drop", "E") not in rp.OB_CANDIDATES

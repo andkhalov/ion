@@ -37,7 +37,10 @@ from pyon import oblique_synth as obs                                        # n
 from pyon import validate as vd                                              # noqa: E402
 
 VS_CANDIDATES = [("drop", "F1"), ("drop", "E"), ("drop", "Es"), ("drop", "F1E")]
-OB_CANDIDATES = [("to_x", "MH"), ("drop", "MH"), ("drop", "F1"), ("drop", "E")]
+# НЗ-сцена (gates.OB_MODES) строится ТОЛЬКО из F2, Es и MH — значит "drop F1" и "drop E" были
+# холостыми и не могли починить ничего (разбор форм 2026-09-07: из 26 отбраковок на трёх ранах
+# 18 — форма S4 «задержка Es не меньше задержки F2», а действия снять Es в наборе не было).
+OB_CANDIDATES = [("to_x", "MH"), ("drop", "Es"), ("drop", "MH"), ("drop", "EsMH")]
 
 
 def _apply(pm: np.ndarray, action, classes) -> np.ndarray:
