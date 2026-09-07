@@ -46,7 +46,7 @@ from pyon import validate as vd                                                 
 from pyon.models import UNet, n_params                                              # noqa: E402
 
 VARIANTS = {"baseline": None, "lognorm": "lognorm", "hinge": "hinge"}
-CE_WEIGHTS = [0.05, 1.0, 1.0, 1.0, 1.0, 1.0]
+CE_WEIGHTS = [0.05, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5]   # BG F2 F1 E Es MH X (X — вспомогательный класс)
 EXTENT = (obs.FOB_MIN, obs.FOB_MAX, obs.P_MIN, obs.P_MAX)
 iF2, iMH, iEs = obs.OB_CLASSES.index("F2"), obs.OB_CLASSES.index("MH"), obs.OB_CLASSES.index("Es")
 
@@ -109,6 +109,16 @@ def decode_oblique(df: pd.DataFrame, component: str, workers: int, seed: int = 0
     dl = DataLoader(ds, batch_size=batch, shuffle=False, num_workers=workers)
     ys, ds_, m1, m2 = zip(*[b for b in dl])
     return torch.cat(ys), torch.cat(ds_), torch.cat(m1), torch.cat(m2)
+
+
+def compose_target(yo: torch.Tensor, yx: torch.Tensor | None):
+    """Цель сегментации: классы O-следов, а пиксели X-следов (там, где нет O) — отдельным классом X.
+    Диагностика на реальных снимках Тромсё 2026-09-07: без класса X модель метила X-след как кратник
+    MH (ближайшее доступное понятие), завышая МПЧ(2F2) и порождая нарушения формы S1."""
+    if yx is None:
+        return yo
+    iX = obs.OB_CLASSES.index("X")
+    return torch.where(yo > 0, yo, torch.where(yx > 0, torch.full_like(yo, iX), torch.zeros_like(yo)))
 
 
 def _dens(cfg):
@@ -336,6 +346,7 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         pick = pick[np.argsort([vds.shard_of(int(i)) for i in pick], kind="stable")]      # по шардам: одна распаковка
         items = [vds[int(i)] for i in pick]
         Yv = torch.stack([a for a, _, _ in items]); Yxv = torch.stack([b for _, b, _ in items])
+        Yv_t = compose_target(Yv, Yxv)
         L = torch.stack([c for _, _, c in items]); M1, M2, Dv = L[:, 0], L[:, 4], L[:, 7]
         src = f"{len(tds)} масок (шарды {cfg.dataset})"
     else:
@@ -390,6 +401,7 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
             y = batch[0].to(dev).long()
             yx = batch[1].to(dev).long() if tds is not None else None
             x = render_input(ren, mh2f2, y, yx, cfg.input_mode, cfg.bg_shift, cfg.cover, _dens(cfg))
+            y = compose_target(y, yx) if cfg.input_mode == "ox" else y      # X-следы — отдельный класс цели
             with torch.autocast("cuda", enabled=scaler.is_enabled()):
                 lg = net(x); loss_ce = ce(lg, y)
             loss = loss_ce
@@ -408,14 +420,14 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         if variant:
             m["train/logic"] = sums["logic"] / max(n_seen, 1)
         t_ev = time.time()
-        mv, pm, rt = evaluate(net, Xv, Yv, Dv, M1, M2, dev, cfg, vocab, ep, log, ref_gate, vz_net)
+        mv, pm, rt = evaluate(net, Xv, Yv_t if cfg.input_mode == 'ox' and tds is not None else Yv, Dv, M1, M2, dev, cfg, vocab, ep, log, ref_gate, vz_net)
         m.update(mv)
         if cfg.tromso_n:                                  # реальные НЗ Тромсё без меток — критерий переноса
             m.update(tromso_probe(net, dev, cfg, vocab, do_gate=(ep % cfg.gate_every == 0 or ep == cfg.epochs - 1),
                                   cache=tromso_cache))
         if len(Yi) and (ep % cfg.images_every == 0 or ep == cfg.epochs - 1):
             (rundir / "png").mkdir(exist_ok=True)
-            log.ionograms("images/fixed_set", Xv[:len(Yi)].numpy(), Yi.numpy(), pm[:len(Yi)], ep, extent=EXTENT,
+            log.ionograms("images/fixed_set", Xv[:len(Yi)].numpy(), Yi.numpy(), pm[:len(Yi)], ep, extent=EXTENT, n_classes=len(obs.OB_CLASSES),
                           titles=[f"D={float(d):.0f}" for d in Di], xlabel="МГц", ylabel="P′, км",
                           save=rundir / "png" / f"ionograms_ep{ep:02d}.png")
         for d, rows, Yd, Yxd, m1d, m2d in day_sets:

@@ -39,7 +39,7 @@ SHARD = 4096
 
 
 def _one(args):
-    i, sao_path = args
+    i, sao_path, d_list = args
     try:
         sao = dfm.read_sao(str(ROOT / sao_path))
     except Exception:
@@ -49,7 +49,7 @@ def _one(args):
     fb = float(np.atleast_1d(np.asarray(gc, float))[0]) if gc is not None and np.size(gc) else 1.3
     if not np.isfinite(fb) or fb <= 0:
         fb = 1.3
-    for d in obs.D_SET:
+    for d in d_list:
         try:
             yo, lo = obs.oblique_masks_from_sao(sao, d, "O")
             yx, lx = obs.oblique_masks_from_sao(sao, d, "X")
@@ -61,7 +61,10 @@ def _one(args):
     return i, out
 
 
-def build(manifest: str, procs: int, limit: int = 0):
+def build(manifest: str, procs: int, limit: int = 0, d_mode: str = "random", d_range=(250.0, 2000.0), n_d: int = 3):
+    """d_mode: "fixed" — дальности из obs.D_SET; "random" — n_d значений на SAO, равномерно из d_range.
+    Случайные D введены 2026-09-07: на трёх фиксированных дальностях модель «примагничивала» след к
+    ближайшей из них (реальная трасса SGO→TGO 430 км читалась со сдвигом P′ на 200–300 км вниз)."""
     df = pd.read_csv(ROOT / manifest, low_memory=False)
     if limit:
         df = df.iloc[np.unique(np.linspace(0, len(df) - 1, limit).round().astype(int))]
@@ -80,8 +83,11 @@ def build(manifest: str, procs: int, limit: int = 0):
                             labels=np.stack([x[2] for x in b]), idx=np.array([x[3] for x in b], np.int32))
         shard_id[split] += 1; bufs[split] = []
 
+    rng = np.random.default_rng(0)
+    jobs = [(i, r.sao, (rng.uniform(*d_range, n_d).round(1).tolist() if d_mode == "random" else list(obs.D_SET)))
+            for i, r in df.iterrows()]
     with Pool(procs) as pool:
-        for k, (i, res) in enumerate(pool.imap(_one, [(i, r.sao) for i, r in df.iterrows()], chunksize=32)):
+        for k, (i, res) in enumerate(pool.imap(_one, jobs, chunksize=32)):
             if res is None:
                 n_bad += 1; continue
             r = df.iloc[i]
@@ -98,7 +104,8 @@ def build(manifest: str, procs: int, limit: int = 0):
         flush(split)
     meta = pd.DataFrame(meta_rows); meta.to_csv(OUT / "meta.csv", index=False)
     json.dump(dict(labels=LABELS, shard=SHARD, classes=obs.OB_CLASSES, grid=dict(NF=obs.NF, NP=obs.NP, FOB=[obs.FOB_MIN, obs.FOB_MAX], P=[obs.P_MIN, obs.P_MAX]),
-                   D_SET=list(obs.D_SET), manifest=manifest, n=len(meta), n_bad_sao=n_bad, built=time.strftime("%Y-%m-%d %H:%M:%S %Z")),
+                   D_SET=list(obs.D_SET), d_mode=d_mode, d_range=list(d_range), n_d=n_d,
+                   manifest=manifest, n=len(meta), n_bad_sao=n_bad, built=time.strftime("%Y-%m-%d %H:%M:%S %Z")),
               open(OUT / "labels.json", "w"), indent=1, ensure_ascii=False)
     print(f"[oblique_dataset] {len(meta)} масок из {len(df)} SAO ({n_bad} битых) за {time.time() - t0:.0f} с → {OUT} "
           f"({sum(f.stat().st_size for f in OUT.glob('*.npz')) / 2**30:.2f} ГБ, шардов train {shard_id['train']} / val {shard_id['val']})", flush=True)
@@ -167,13 +174,19 @@ def main():
     ap.add_argument("--manifest", default="data/manifest.csv")
     ap.add_argument("--procs", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--d_mode", default="random", choices=["random", "fixed"])
+    ap.add_argument("--d_range", default="250,2000")
+    ap.add_argument("--n_d", type=int, default=3)
+    ap.add_argument("--out", default="data/oblique")
     ap.add_argument("--gallery", type=int, default=0, help="число образцов галереи (0 — не строить)")
     ap.add_argument("--renderer", default="runs/E4/gan/weights.pt")
     ap.add_argument("--no-build", action="store_true", help="только галерея")
     ap.add_argument("--bg_shift", action=argparse.BooleanOptionalAction, default=True)
     a = ap.parse_args()
     if not a.no_build:
-        build(a.manifest, a.procs, a.limit)
+        global OUT
+        OUT = ROOT / a.out
+        build(a.manifest, a.procs, a.limit, a.d_mode, tuple(float(v) for v in a.d_range.split(",")), a.n_d)
     if a.gallery:
         gallery(a.renderer, a.gallery, bg_shift=a.bg_shift)
 

@@ -52,7 +52,7 @@ from pyon import oblique_synth as obs                       # noqa: E402
 from pyon.models import UNet, n_params                      # noqa: E402
 
 N_CLASSES = len(canon.CLASSES)                              # 5: BG F2 F1 E Es
-MH2F2 = torch.tensor([0, 1, 2, 3, 4, 1])                    # НЗ-классы (obs.OB_CLASSES) → ВЗ-каналы
+MH2F2 = torch.tensor([0, 1, 2, 3, 4, 1, 1])                 # НЗ-классы (obs.OB_CLASSES) → ВЗ-каналы (MH и X → F2)
 
 
 class Renderer(nn.Module):
