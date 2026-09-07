@@ -507,14 +507,23 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         log.scalars({k: v for k, v in m.items() if k != "epoch"}, ep); log.row(m, ep); hist.append(m)
         ckpt = {"state_dict": net.state_dict(), "cfg": asdict(cfg), "epoch": ep, "metrics": m}
         torch.save(ckpt, rundir / "weights_last.pt")
-        if cfg.best_by == "real" and np.isfinite(m.get("real/muf_dt_med", np.nan)):
+        if cfg.best_by == "real":
             # Выбор чекпойнта по РЕАЛЬНЫМ снимкам без меток (смоук 2026-09-06: синтетические метрики
             # стоят, реальные деградируют — выбор по синтетике даёт переученную на рендер модель).
             # Критерий: временная гладкость МПЧ (МГц между соседними снимками) + доля нарушений физики;
             # модель, молчащая на большинстве снимков (< 50 % найденных F2), не рассматривается.
-            crit = m["real/muf_dt_med"] + m.get("real/gate_violations", 0.0)
-            if m.get("real/has_F2_frac", 0.0) < 0.5:
-                crit = float("inf")
+            # ВАЖНО (найдено 2026-09-07): падать на синтетическую метрику, когда реальная не
+            # посчиталась, НЕЛЬЗЯ — синтетика улучшается монотонно, и такие эпохи всегда выигрывают
+            # (так E5/lognorm выбрал эпоху 5, а E5/lognorm_b48 — эпоху 13, ни разу не применив
+            # реальный критерий). Эпоха без валидного реального критерия просто пропускается.
+            # Покрытие входит в критерий слагаемым (1 − доля найденных F2): гладкость считается ТОЛЬКО
+            # по парам, где след найден на обоих снимках, поэтому молчаливая модель получает мало пар
+            # и заведомо лёгких — порога has_F2_frac >= 0.5 против этого мало (переоценка 2026-09-07:
+            # baseline@ep0 покрывает 12/12 пар при 0.26 МГц, эпохи 19 — 5–6 пар при 0.17–0.52).
+            crit = float("inf")
+            if np.isfinite(m.get("real/muf_dt_med", np.nan)) and m.get("real/muf_dt_n", 0) >= 6 \
+                    and m.get("real/has_F2_frac", 0.0) >= 0.5 and np.isfinite(m.get("real/gate_violations", np.nan)):
+                crit = m["real/muf_dt_med"] + m["real/gate_violations"] + (1.0 - m["real/has_F2_frac"])
         else:
             crit = m.get("val/MUF1F2_med", np.nan)
         if np.isfinite(crit) and crit < best["value"]:
