@@ -227,7 +227,13 @@ def tromso_probe(net, dev, cfg, vocab=None, do_gate: bool = False, cache: dict |
     cache = cache if cache is not None else {}
     if "X" not in cache:
         d = ROOT / "data" / "tromso" / cfg.tromso_route
-        files = sorted(d.glob("*.png"))[-cfg.tromso_n:] if cfg.tromso_n else []
+        fixed = ROOT / "data" / "tromso" / "probe_set.json"
+        if fixed.exists():                       # ФИКСИРОВАННЫЙ набор (сопоставимость эпох, ранов и раундов)
+            spec = json.loads(fixed.read_text(encoding="utf-8"))
+            files = [d / n for n in spec["files"]] if spec.get("route") == cfg.tromso_route else []
+            files = [f for f in files if f.exists()][:cfg.tromso_n] if cfg.tromso_n else []
+        else:
+            files = sorted(d.glob("*.png"))[-cfg.tromso_n:] if cfg.tromso_n else []
         xs, cov, times = [], [], []
         for fp in files:
             try:
