@@ -177,30 +177,40 @@ def render_input(ren, mh2f2, yo: torch.Tensor, yx: torch.Tensor | None, mode: st
 
 
 @torch.no_grad()
-def tromso_probe(net, dev, cfg, vocab=None, do_gate: bool = False) -> dict:
+def tromso_probe(net, dev, cfg, vocab=None, do_gate: bool = False, cache: dict | None = None) -> dict:
     """Контроль на РЕАЛЬНЫХ НЗ Тромсё без меток (Э3 §4 п.4; критерий ранней остановки для E5, где
-    реальных меток нет — вывод E4 о деградации переноса с числом шагов): доля снимков с найденным F2,
-    медиана МПЧ 1F2 и её IQR, инвариант 2F2/1F2, доля SHACL-нарушений на реальных сценах."""
+    реальных меток нет — вывод E4 о деградации переноса с числом шагов). Метрики: доля снимков с
+    найденным F2, медиана МПЧ 1F2 и её IQR, инвариант 2F2/1F2, доля SHACL-нарушений, и главное —
+    **временная гладкость** `muf_dt_med`: медиана |ΔМПЧ| между соседними снимками (15 мин). МПЧ
+    меняется медленно, поэтому скачки от снимка к снимку — прямой признак ошибок чтения; эта мера, в
+    отличие от доли найденных следов, не поощряет «щедрую» разметку. Набор снимков ФИКСИРУЕТСЯ при
+    первом вызове (`cache`): скрейпер добавляет новые, иначе метрики эпох несравнимы."""
     from pyon import tromso as tg
-    d = ROOT / "data" / "tromso" / cfg.tromso_route
-    files = sorted(d.glob("*.png"))[-cfg.tromso_n:] if cfg.tromso_n else []
-    if not files:
-        return {}
-    xs, cov = [], []
-    for fp in files:
-        try:
-            snr, f, r = tg.png_to_snr(fp, cfg.tromso_route)
-            x, cv = tg.rasterize(snr, f, r, "zero", cfg.tromso_active, None)
-            xs.append(x); cov.append(cv)
-        except Exception:
-            continue
-    if not xs:
-        return {}
-    X = torch.from_numpy(np.stack(xs)).float().div(255)
+    cache = cache if cache is not None else {}
+    if "X" not in cache:
+        d = ROOT / "data" / "tromso" / cfg.tromso_route
+        files = sorted(d.glob("*.png"))[-cfg.tromso_n:] if cfg.tromso_n else []
+        xs, cov, times = [], [], []
+        for fp in files:
+            try:
+                snr, f, r = tg.png_to_snr(fp, cfg.tromso_route)
+                x, cv = tg.rasterize(snr, f, r, "zero", cfg.tromso_active, None)
+                xs.append(x); cov.append(cv); times.append(pd.Timestamp(fp.stem))
+            except Exception:
+                continue
+        if not xs:
+            return {}
+        cache["X"] = torch.from_numpy(np.stack(xs)).float().div(255)
+        cache["cov"] = np.stack(cov); cache["t"] = pd.to_datetime(times)
+    X, cov = cache["X"], cache["cov"]
     pm, _ = predict(net, X, dev)
-    pm = np.where(np.stack(cov), pm, 0).astype(pm.dtype)
+    pm = np.where(cov, pm, 0).astype(pm.dtype)
     f1, f2, pn = muf_readouts(pm)
-    m = {"real/n": len(xs), "real/has_F2_frac": float(np.isfinite(f1).mean()),
+    dt = np.diff(cache["t"].values).astype("timedelta64[m]").astype(float)
+    step_ok = (dt <= 20) & np.isfinite(f1[1:]) & np.isfinite(f1[:-1])
+    m = {"real/n": len(X), "real/has_F2_frac": float(np.isfinite(f1).mean()),
+         "real/muf_dt_med": float(np.median(np.abs(f1[1:][step_ok] - f1[:-1][step_ok]))) if step_ok.sum() >= 3 else np.nan,
+         "real/muf_dt_n": int(step_ok.sum()),
          "real/muf1F2_med": float(np.nanmedian(f1)) if np.isfinite(f1).any() else np.nan,
          "real/muf1F2_iqr": float(np.nanpercentile(f1, 75) - np.nanpercentile(f1, 25)) if np.isfinite(f1).sum() > 3 else np.nan,
          "real/has_MH_frac": float(np.isfinite(f2).mean())}
@@ -369,7 +379,7 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
     vocab = vd.load_vocabulary(); ref_gate: dict = {}
     variant = VARIANTS[cfg.variant]
     print(f"  U-Net {n_params(net)} параметров, вариант {cfg.variant}, рендерер {cfg.renderer}", flush=True)
-    best = dict(value=float("inf"), epoch=-1); hist = []
+    best = dict(value=float("inf"), epoch=-1); hist = []; tromso_cache: dict = {}
     for ep in range(cfg.epochs):
         net.train(); t_ep = time.time(); n_seen = 0; sums = {"CE": 0.0, "logic": 0.0}
         if sampler is not None:
@@ -401,7 +411,8 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         mv, pm, rt = evaluate(net, Xv, Yv, Dv, M1, M2, dev, cfg, vocab, ep, log, ref_gate, vz_net)
         m.update(mv)
         if cfg.tromso_n:                                  # реальные НЗ Тромсё без меток — критерий переноса
-            m.update(tromso_probe(net, dev, cfg, vocab, do_gate=(ep % cfg.gate_every == 0 or ep == cfg.epochs - 1)))
+            m.update(tromso_probe(net, dev, cfg, vocab, do_gate=(ep % cfg.gate_every == 0 or ep == cfg.epochs - 1),
+                                  cache=tromso_cache))
         if len(Yi) and (ep % cfg.images_every == 0 or ep == cfg.epochs - 1):
             (rundir / "png").mkdir(exist_ok=True)
             log.ionograms("images/fixed_set", Xv[:len(Yi)].numpy(), Yi.numpy(), pm[:len(Yi)], ep, extent=EXTENT,
@@ -426,11 +437,14 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         log.scalars({k: v for k, v in m.items() if k != "epoch"}, ep); log.row(m, ep); hist.append(m)
         ckpt = {"state_dict": net.state_dict(), "cfg": asdict(cfg), "epoch": ep, "metrics": m}
         torch.save(ckpt, rundir / "weights_last.pt")
-        if cfg.best_by == "real" and "real/gate_violations" in m:
-            # выбор чекпойнта по РЕАЛЬНЫМ снимкам без меток: меньше нарушений физики и больше найденных
-            # следов (смоук 2026-09-06: синтетические метрики стоят, реальные деградируют с эпохами —
-            # выбирать по синтетике значит выбрать переученную на рендер модель)
-            crit = m["real/gate_violations"] - 0.5 * m.get("real/has_F2_frac", 0.0)
+        if cfg.best_by == "real" and np.isfinite(m.get("real/muf_dt_med", np.nan)):
+            # Выбор чекпойнта по РЕАЛЬНЫМ снимкам без меток (смоук 2026-09-06: синтетические метрики
+            # стоят, реальные деградируют — выбор по синтетике даёт переученную на рендер модель).
+            # Критерий: временная гладкость МПЧ (МГц между соседними снимками) + доля нарушений физики;
+            # модель, молчащая на большинстве снимков (< 50 % найденных F2), не рассматривается.
+            crit = m["real/muf_dt_med"] + m.get("real/gate_violations", 0.0)
+            if m.get("real/has_F2_frac", 0.0) < 0.5:
+                crit = float("inf")
         else:
             crit = m.get("val/MUF1F2_med", np.nan)
         if np.isfinite(crit) and crit < best["value"]:
