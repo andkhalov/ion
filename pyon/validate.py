@@ -44,7 +44,7 @@ VOCAB_FILES = ["iono-core.ttl", "iono-char.ttl", "iono-quality.ttl",
                "iono-es.ttl", "iono-phenomena.ttl", "iono-observation.ttl"]
 HYGIENE_FILES = ["iono-shapes-hygiene.ttl"]
 MAIN_SHAPE_FILES = ["iono-shapes.ttl", "iono-shapes-ext.ttl",
-                    "iono-shapes-quality.ttl", "iono-shapes-vs.ttl"]
+                    "iono-shapes-quality.ttl", "iono-shapes-vs.ttl", "iono-shapes-ob.ttl"]
 
 
 def dec(v) -> Literal:
@@ -206,6 +206,27 @@ def regression():
     _mode(g, "vsA__2", "2F2", 2, "F2", "ordinary", 8.2, 2 * 223)
     _mode(g, "vsA__3", "3F2", 3, "F2", "ordinary", 8.2, 3 * 223)
     case("ВЗ корректная (VerticalIonogram выведен из сеанса)", g, [])
+
+    # 2b) НЗ: магнитоионная пара O/X (S7) — новая форма 2026-09-07
+    def _obion(g, name, gyro=0.8):
+        ion = IONO[name]
+        g.add((ion, RDF.type, IONO.ObliqueIonogram)); g.add((ion, IONO.hasGyroFrequency, dec(gyro)))
+        return ion
+
+    g = Graph(); _obion(g, "obA")                       # корректная пара: sec ≈ 1.06, fB = 0.8
+    _mode(g, "obA__1", "1F2", 1, "F2", "ordinary", 8.00, 700)
+    _mode(g, "obA__1x", "1F2x", 1, "F2", "extraordinary", 8.44, 700)
+    case("НЗ корректная O/X-пара (S7)", g, [])
+
+    g = Graph(); _obion(g, "obB")                       # X ниже O — компоненты перепутаны (S7w) и вне соотношения (S7)
+    _mode(g, "obB__1", "1F2", 1, "F2", "ordinary", 8.44, 700)
+    _mode(g, "obB__1x", "1F2x", 1, "F2", "extraordinary", 8.00, 700)
+    case("НЗ O/X перепутаны", g, ["S7"], expect_warn=["S7w"])
+
+    g = Graph(); _obion(g, "obC")                       # X слишком далеко от O (секанс > 6): X принят за кратник/чужую моду
+    _mode(g, "obC__1", "1F2", 1, "F2", "ordinary", 8.00, 700)
+    _mode(g, "obC__1x", "1F2x", 1, "F2", "extraordinary", 12.00, 700)
+    case("НЗ X-след слишком далеко от O", g, ["S7"])
 
     # 3) ВЗ: перестановка 1F2/2F2 → V3 (+S2)
     g = Graph(); _vion(g, "vsB")

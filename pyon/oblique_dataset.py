@@ -34,29 +34,28 @@ from pyon import digi_formats as dfm                       # noqa: E402
 from pyon import oblique_synth as obs                       # noqa: E402
 
 OUT = ROOT / "data" / "oblique"
-LABELS = ["muf_F2", "muf_F1", "muf_E", "muf_Es", "muf_MH", "muf_F2_x", "muf_MH_x", "D_km", "fB"]
+LABELS = ["muf_F2", "muf_F1", "muf_E", "muf_Es", "muf_MH", "muf_F2_x", "muf_MH_x", "D_km", "fB", "azimuth_deg", "dip_deg"]
 SHARD = 4096
 
 
 def _one(args):
-    i, sao_path, d_list = args
+    i, sao_path, d_list, az_list = args
     try:
         sao = dfm.read_sao(str(ROOT / sao_path))
     except Exception:
         return i, None
     out = []
-    gc = sao.get("geophys_const")
-    fb = float(np.atleast_1d(np.asarray(gc, float))[0]) if gc is not None and np.size(gc) else 1.3
-    if not np.isfinite(fb) or fb <= 0:
-        fb = 1.3
-    for d in d_list:
+    gcv = np.atleast_1d(np.asarray(sao.get("geophys_const", [1.3, 65.0]), float))
+    fb = float(gcv[0]) if gcv.size and np.isfinite(gcv[0]) and gcv[0] > 0 else 1.3
+    dip = float(gcv[1]) if gcv.size > 1 and np.isfinite(gcv[1]) else 65.0
+    for d, az in zip(d_list, az_list):
         try:
             yo, lo = obs.oblique_masks_from_sao(sao, d, "O")
-            yx, lx = obs.oblique_masks_from_sao(sao, d, "X")
+            yx, lx = obs.oblique_masks_from_sao(sao, d, "X", az)
         except Exception:
             return i, None
         lab = np.array([lo.get("muf_F2", np.nan), lo.get("muf_F1", np.nan), lo.get("muf_E", np.nan), lo.get("muf_Es", np.nan),
-                        lo.get("muf_MH", np.nan), lx.get("muf_F2", np.nan), lx.get("muf_MH", np.nan), d, fb], np.float32)
+                        lo.get("muf_MH", np.nan), lx.get("muf_F2", np.nan), lx.get("muf_MH", np.nan), d, fb, az, dip], np.float32)
         out.append((yo, yx, lab))
     return i, out
 
@@ -84,7 +83,8 @@ def build(manifest: str, procs: int, limit: int = 0, d_mode: str = "random", d_r
         shard_id[split] += 1; bufs[split] = []
 
     rng = np.random.default_rng(0)
-    jobs = [(i, r.sao, (rng.uniform(*d_range, n_d).round(1).tolist() if d_mode == "random" else list(obs.D_SET)))
+    jobs = [(i, r.sao, (rng.uniform(*d_range, n_d).round(1).tolist() if d_mode == "random" else list(obs.D_SET)),
+             rng.uniform(0.0, 360.0, n_d).round(1).tolist())
             for i, r in df.iterrows()]
     with Pool(procs) as pool:
         for k, (i, res) in enumerate(pool.imap(_one, jobs, chunksize=32)):

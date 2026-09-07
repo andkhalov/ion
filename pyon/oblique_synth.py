@@ -144,6 +144,33 @@ def bouguer_trace(prof_h, prof_fp, f_mhz: float, phi0_deg: float, n_int: int = 4
     return float(dD), float(dP)
 
 
+def ah_n2(X, Y, theta: float, mode: str):
+    """Квадрат показателя преломления по ПОЛНОЙ формуле Эпплтона–Хартри без столкновений:
+    n² = 1 − X / [1 − Y_T²/(2(1−X)) ± sqrt(Y_T⁴/(4(1−X)²) + Y_L²)], «+» — обыкновенная мода, «−» —
+    необыкновенная; Y_L = Y·cos θ, Y_T = Y·sin θ, θ — угол между нормалью волны и геомагнитным полем.
+    Уровни отражения (n² = 0) от θ НЕ зависят: X = 1 для O и X = 1 − Y для X (проверено численно
+    2026-09-07 для θ = 1…89°) — поэтому соотношение fo² = fx(fx − fB) верно при любом направлении
+    распространения, а от θ зависит только ГРУППОВОЙ показатель (и значит действующая высота)."""
+    u = np.clip(1.0 - X, 1e-9, None)
+    yt, yl = Y * np.sin(theta), Y * np.cos(theta)
+    a_ = yt ** 2 / (2 * u)
+    b_ = np.sqrt(yt ** 4 / (4 * u ** 2) + yl ** 2)
+    den = 1.0 - a_ + (b_ if mode == "O" else -b_)
+    return 1.0 - X / np.where(np.abs(den) < 1e-12, 1e-12, den)
+
+
+def theta_apex(dip_deg: float, az_deg: float, phi0: float, dec_deg: float = 0.0) -> float:
+    """Угол θ между нормалью волны в вершине траектории и геомагнитным полем.
+    Нормаль наклонена на φ0 от вертикали в азимуте az (от севера); поле задано наклонением dip
+    (вниз) и склонением dec. cos θ = |cos φ0·sin I − sin φ0·cos I·cos(az − dec)|.
+    При φ0 = 0 (вертикальное зондирование) даёт θ = 90° − I: на средних широтах ≈ 20°
+    (квазипродольный случай), на магнитном экваторе ≈ 88° (квазипоперечный) — там
+    квазипродольное приближение неприменимо."""
+    I, A = np.radians(dip_deg), np.radians(az_deg - dec_deg)
+    c = np.cos(phi0) * np.sin(I) - np.sin(phi0) * np.cos(I) * np.cos(A)
+    return float(np.arccos(np.clip(np.abs(c), 0.0, 1.0)))
+
+
 def group_index(fp: np.ndarray, f: float, f_b: float, mode: str) -> np.ndarray:
     """Групповой показатель μ′ = d(f·n)/df квазипродольной формулы Апплтона–Хартри без столкновений:
     n² = 1 − X/(1 − s·Y), X = fp²/f², Y = fB/f; s = 0 — O-мода (отражение при X = 1), s = 1 — X-мода
@@ -161,31 +188,58 @@ def group_index(fp: np.ndarray, f: float, f_b: float, mode: str) -> np.ndarray:
     return np.clip(mu, 0.0, 50.0)
 
 
-def hprime_from_profile(prof_h, prof_fp, f, f_b: float, mode: str):
-    """Действующая высота h′(f) = h₀ + ∫ μ′ dh до высоты отражения по профилю (h, fp); NaN, если волна не
-    отражается внутри профиля. f — скаляр или массив (векторизовано по частотам: матрица [n_f, n_h])."""
+def hprime_from_profile(prof_h, prof_fp, f, f_b: float, mode: str, theta: float | None = None,
+                        step_km: float = 1.0, mu_max: float = 30.0):
+    """Действующая высота h′(f) = h₀ + ∫ μ′ dh до высоты отражения по профилю (h, fp); NaN, если волна
+    не отражается внутри профиля. f — скаляр или массив (векторизовано по частотам).
+
+    theta — угол между нормалью волны и полем (рад): при None используется квазипродольное
+    приближение (n² = 1 − X/(1 ∓ Y)), иначе ПОЛНАЯ формула Эпплтона–Хартри `ah_n2` — она обязательна
+    вблизи магнитного экватора (квазипоперечный случай θ → 90°, где КП-приближение неприменимо;
+    у JI91J наклонение 2°, это 40 % корпуса).
+
+    Численно: профиль передискретизируется с шагом step_km (у SAO шаг 5–10 км, а μ′ у отражения
+    растёт как 1/√(1−X)), групповой показатель ограничен mu_max — интегрируемая особенность
+    обрезается, поэтому h′ вблизи самой критической частоты слегка занижена; это тот же приём,
+    что в стандартных инверсиях (аналитический хвост даёт поправку меньше шага решётки P′ 22.7 км)."""
     h = np.asarray(prof_h, float); fp = np.asarray(prof_fp, float)
     ok = np.isfinite(h) & np.isfinite(fp) & (fp > 0)
     h, fp = h[ok], fp[ok]
     f = np.atleast_1d(np.asarray(f, float))
     if len(h) < 3:
         return np.full(f.shape, np.nan) if f.size > 1 else np.nan
+    hg = np.arange(h[0], h[-1] + step_km, step_km)                     # равномерная сетка по высоте
+    fg = np.interp(hg, h, fp)
     s_ = 1.0 if mode == "X" else 0.0
     ff = f[:, None]
     def n_of(q):
-        return np.sqrt(np.clip(1.0 - (fp[None, :] / q) ** 2 / (1.0 - s_ * f_b / q), 1e-9, None))
+        X = (fg[None, :] / q) ** 2; Y = f_b / q
+        if theta is None:
+            return np.sqrt(np.clip(1.0 - X / (1.0 - s_ * Y), 1e-9, None))
+        return np.sqrt(np.clip(ah_n2(X, Y, theta, "X" if s_ else "O"), 1e-9, None))
     d = ff * 1e-3
-    mu = np.clip(n_of(ff) + ff * (n_of(ff + d) - n_of(ff - d)) / (2 * d), 0.0, 50.0)         # [n_f, n_h]
-    refl = (fp[None, :] / ff) ** 2 >= (1.0 - s_ * f_b / ff)                                   # отражение
-    has = refl.any(1); j = np.where(has, refl.argmax(1), len(h) - 1)
-    idx = np.arange(len(h))[None, :]
-    mu = np.where(idx <= j[:, None], mu, 0.0)                                                  # интегрируем до отражения
-    hp = h[0] + np.trapz(mu, h, axis=1)
+    mu = np.clip(n_of(ff) + ff * (n_of(ff + d) - n_of(ff - d)) / (2 * d), 0.0, mu_max)
+    refl = (fg[None, :] / ff) ** 2 >= (1.0 - s_ * f_b / ff)             # уровни отражения от θ не зависят
+    has = refl.any(1); j = np.where(has, refl.argmax(1), len(hg) - 1)
+    idx = np.arange(len(hg))[None, :]
+    mu = np.where(idx <= j[:, None], mu, 0.0)
+    hp = hg[0] + np.trapz(mu, hg, axis=1)
     hp = np.where(has & (j > 0), hp, np.nan)
     return hp if f.size > 1 else float(hp[0])
 
 
-def x_trace_from_o(fv_o, hv_o, f_b: float, prof_h=None, prof_fp=None):
+def phi0_at(h_km, d_km: float, hops: int = 1) -> float:
+    """Угол падения φ0 в вершине эквивалентного треугольника Брейта–Тьюва (рад) для дальности d_km."""
+    theta_c = (d_km / hops) / (2.0 * R_E)
+    rh = R_E + float(h_km)
+    tan_delta = (np.cos(theta_c) - R_E / rh) / np.sin(theta_c)
+    if tan_delta <= 0:
+        return float(np.pi / 2)
+    delta = np.arctan(tan_delta)
+    return float(np.arcsin(np.clip(R_E * np.cos(delta) / rh, 0.0, 1.0)))
+
+
+def x_trace_from_o(fv_o, hv_o, f_b: float, prof_h=None, prof_fp=None, theta: float | None = None):
     """X-след из O-следа вертикальной ионограммы (в корпусе ARTIST-5 X-полилиний
     в SAO нет — проверено 0/224 файлов, есть только скаляр fxI).
 
@@ -204,8 +258,8 @@ def x_trace_from_o(fv_o, hv_o, f_b: float, prof_h=None, prof_fp=None):
         # E3b (аудит 2026-09-06): h′x(fx) = h′o(fo) + [∫μ′x(fx) dh − ∫μ′o(fo) dh] по профилю NHPC;
         # без поправки ошибка медиана 11 км, у носа до 70 км. Поправка применяется там, где обе
         # волны отражаются внутри профиля; иначе — первый порядок (h′x = h′o).
-        ho = hprime_from_profile(prof_h, prof_fp, fv_o, f_b, "O")
-        hx = hprime_from_profile(prof_h, prof_fp, fx, f_b, "X")
+        ho = hprime_from_profile(prof_h, prof_fp, fv_o, f_b, "O", theta)
+        hx = hprime_from_profile(prof_h, prof_fp, fx, f_b, "X", theta)
         okc = np.isfinite(ho) & np.isfinite(hx)
         hv[okc] = hv[okc] + (hx[okc] - ho[okc])
     return fx, hv
@@ -250,7 +304,8 @@ SAO_TRACES_BY_COMPONENT = {
 SAO_TRACES = SAO_TRACES_BY_COMPONENT["O"]         # обратная совместимость
 
 
-def oblique_masks_from_sao(sao: dict, d_km: float, component: str = "O") -> tuple[np.ndarray, dict]:
+def oblique_masks_from_sao(sao: dict, d_km: float, component: str = "O",
+                           azimuth_deg: float = 0.0) -> tuple[np.ndarray, dict]:
     """SAO → (маска int8 [NP, NF] классов OB_CLASSES, точные МПЧ-метки).
 
     component: "O" или "X" — какое семейство полилиний SAO пересчитывать
@@ -268,15 +323,22 @@ def oblique_masks_from_sao(sao: dict, d_km: float, component: str = "O") -> tupl
         # частоты точно по fo² = fx(fx − fB) (fB станции: ×0.89 для F-области, ×0.95 для E — гирочастота
         # на высоте слоя), высоты — с поправкой E3b по профилю NHPC, если он есть
         gc = sao.get("geophys_const")
-        fb0 = float(np.atleast_1d(np.asarray(gc, float))[0]) if gc is not None and np.size(gc) else 1.3
+        gcv = np.atleast_1d(np.asarray(gc, float)) if gc is not None and np.size(gc) else np.array([1.3, 65.0])
+        fb0 = float(gcv[0]); dip = float(gcv[1]) if gcv.size > 1 and np.isfinite(gcv[1]) else 65.0
         ph, pf = sao.get("profile_h"), sao.get("profile_fp")
         for cls, okey in SAO_TRACES_BY_COMPONENT["O"].items():
             xkey = traces.get(cls)
             fq, vh = sao.get(f"{okey}_freq"), sao.get(f"{okey}_vh")
             if xkey is None or fq is None or vh is None or not len(fq):
                 continue
-            fb = fb0 * (0.89 if cls in ("F2", "F1") else 0.95)
-            fx, hx = x_trace_from_o(fq, vh, fb, ph, pf)
+            fb = fb0 * (0.89 if cls in ("F2", "F1") else 0.95)      # гирочастота на высоте слоя (B ∝ 1/r³)
+            # угол θ между нормалью волны и полем в вершине траектории: наклонение станции (SAO,
+            # geophys_const[1]), азимут трассы и угол падения φ0 при данной дальности. Один θ на след
+            # (по медианной h′): вдоль следа он меняется слабо, а разность h′x − h′o меняется по θ на
+            # ~18 км ≈ 0.8 ячейки решётки P′ (измерено 2026-09-07).
+            hmed = float(np.nanmedian(np.asarray(vh, float))) if len(vh) else 250.0
+            th = theta_apex(dip, azimuth_deg, phi0_at(hmed, d_km))
+            fx, hx = x_trace_from_o(fq, vh, fb, ph, pf, th)
             sao[f"{xkey}_freq"], sao[f"{xkey}_vh"] = fx, hx
     # сначала MH (2 скачка F2), потом 1-скачковые поверх — приоритет у основного следа.
     # MH сознательно ограничен кратником F2: доминирующая многоскачковая мода на реальных НЗ;
@@ -297,4 +359,5 @@ def oblique_masks_from_sao(sao: dict, d_km: float, component: str = "O") -> tupl
             labels[f"muf_{cls}"] = float(f1h.max())
     labels["muf_MH"] = max(mh_mufs) if mh_mufs else np.nan
     labels["D_km"] = d_km
+    labels["azimuth_deg"] = float(azimuth_deg)
     return y, labels

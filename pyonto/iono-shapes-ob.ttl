@@ -1,0 +1,86 @@
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix iono:    <http://scilibai.ru/onto/iono#> .
+
+# =====================================================================
+#  iono-shapes-ob.ttl — ФОРМЫ НАКЛОННОГО ЗОНДИРОВАНИЯ: магнитоионная пара O/X (S7, S7w), 0.1.0
+#
+#  Зачем (2026-09-07): при вертикальном зондировании дигизонд разделяет поляризации АППАРАТНО
+#  (скрещённые антенны, два канала приёмника), поэтому форма V4 работает с уже разделёнными
+#  O- и X-модами. Чирп-зонд наклонной трассы (Тромсё, chirpsounder2) принимает на одну антенну:
+#  O- и X-следы лежат в одной картинке, и разделять их должна интерпретация. Диагностика показала,
+#  что без явного понятия X автоскейлер относит X-след к ближайшему доступному — кратнику 2F2,
+#  завышая МПЧ кратника; форма S1 это ловит косвенно, S7 проверяет пару напрямую.
+#
+#  Физика. Отражение O- и X-волн от одного уровня Nₑ связано точным магнитоионным соотношением
+#  fo² = fx(fx − fB) (как в V4). При наклонном падении обе частоты умножаются на секанс угла падения
+#  в вершине траектории: МПЧ_O = sec·fo, МПЧ_X = sec·fx. Подстановка даёт
+#      МПЧ_O² = МПЧ_X · (МПЧ_X − fB·sec),
+#  то есть ту же форму с fB → fB·sec. Секанс из сцены неизвестен (зависит от дальности трассы и
+#  высоты отражения), поэтому он ограничен снизу и сверху: sec ∈ [0.8, 6.0]. Нижняя граница ниже
+#  геометрической единицы намеренно: МПЧ_O и МПЧ_X — максимумы по СВОИМ следам, и вершины у них
+#  достигаются в чуть разных точках, из-за чего эффективный секанс, вычисленный по паре МПЧ, слегка
+#  «плывёт» (измерено на 35 676 аналитических парах корпуса: медиана 1.06, 1–99 % 0.83…2.17, max 3.28).
+#  Верхняя граница 6.0 покрывает трассы до ~2000 км при низком отражающем слое. Допуск ±0,3 МГц по
+#  МПЧ_O — как в V4 (разрешение снятия). Нарушений на аналитических метках корпуса: 6·10⁻⁵.
+#
+#  S7  (Violation): пара O/X одного слоя и кратности не укладывается в соотношение при sec ∈ [0.8, 6].
+#  S7w (Warning): МПЧ необыкновенной моды не превышает МПЧ обыкновенной — X всегда выше по частоте;
+#      вынесено отдельно, потому что это грубейший случай (перепутаны компоненты).
+# =====================================================================
+
+<http://scilibai.ru/onto/iono/shapes-ob> a owl:Ontology ;
+    rdfs:label "SHACL-формы наклонного зондирования: магнитоионная пара O/X (S7)"@ru ;
+    dcterms:source "физика O/X: fo² = fx(fx − fB) [Davies1990, гл. 6]; закон секанса [РД2023] §6.5.6" ;
+    owl:versionInfo "0.1.0-prototype" .
+
+iono:IonogramOBShape a sh:NodeShape ;
+    sh:targetClass iono:ObliqueIonogram ;
+    sh:severity sh:Violation ;
+    rdfs:label "Ограничения наклонного зондирования (S7)"@ru ;
+
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "S7: наклонная O/X-пара {?mo}/{?mx} не согласуется с гирочастотой (МПЧ_O² = МПЧ_X(МПЧ_X − fB·sec), sec ∈ [0,8; 6,0], допуск ±0,3 МГц)"@ru ;
+        sh:severity sh:Violation ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?mo ?mx WHERE {
+              $this iono:hasGyroFrequency ?rfh .
+              ?t1 iono:isTraceIn $this ; iono:denotes ?mo .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?mx .
+              ?mo iono:hasMagnetoionicComponent iono:ordinary ;
+                  iono:hasHopCount ?n ; iono:reflectsFromLayer ?L ; iono:hasMOFValue ?rfo .
+              ?mx iono:hasMagnetoionicComponent iono:extraordinary ;
+                  iono:hasHopCount ?n ; iono:reflectsFromLayer ?L ; iono:hasMOFValue ?rfx .
+              BIND (xsd:decimal(STR(?rfh)) AS ?fh) BIND (xsd:decimal(STR(?rfo)) AS ?fo)
+              BIND (xsd:decimal(STR(?rfx)) AS ?fx)
+              BIND (?fx * (?fx - 6.0 * ?fh) AS ?lo)
+              BIND (?fx * (?fx - 0.8 * ?fh) AS ?hi)
+              FILTER ( (?fo + 0.3) * (?fo + 0.3) < ?lo || (?fo - 0.3) * (?fo - 0.3) > ?hi )
+            }
+        """ ] ;
+
+    .
+
+iono:IonogramOBOrderShape a sh:NodeShape ;
+    sh:targetClass iono:ObliqueIonogram ;
+    sh:severity sh:Warning ;
+    rdfs:label "S7w: компоненты O/X переставлены"@ru ;
+    sh:sparql [ a sh:SPARQLConstraint ;
+        sh:message "S7w: МПЧ необыкновенной моды {?mx} не превышает МПЧ обыкновенной {?mo} — компоненты перепутаны"@ru ;
+        sh:prefixes iono: ;
+        sh:select """
+            SELECT DISTINCT $this ?mo ?mx WHERE {
+              ?t1 iono:isTraceIn $this ; iono:denotes ?mo .
+              ?t2 iono:isTraceIn $this ; iono:denotes ?mx .
+              ?mo iono:hasMagnetoionicComponent iono:ordinary ;
+                  iono:hasHopCount ?n ; iono:reflectsFromLayer ?L ; iono:hasMOFValue ?rfo .
+              ?mx iono:hasMagnetoionicComponent iono:extraordinary ;
+                  iono:hasHopCount ?n ; iono:reflectsFromLayer ?L ; iono:hasMOFValue ?rfx .
+              BIND (xsd:decimal(STR(?rfo)) AS ?fo) BIND (xsd:decimal(STR(?rfx)) AS ?fx)
+              FILTER (?fx <= ?fo)
+            }
+        """ ] .
