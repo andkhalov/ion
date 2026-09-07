@@ -22,7 +22,7 @@ import pandas as pd                                 # noqa: E402
 from matplotlib.colors import ListedColormap        # noqa: E402
 from torch.utils.tensorboard import SummaryWriter   # noqa: E402
 
-MASK_COLORS = ["black", "cyan", "lime", "yellow", "magenta", "red", "deepskyblue"]   # BG F2 F1 E Es MH X
+MASK_COLORS = ["black", "cyan", "lime", "yellow", "magenta", "red", "white"]   # BG F2 F1 E Es MH X
 CMAP_MASK = ListedColormap(MASK_COLORS)
 
 

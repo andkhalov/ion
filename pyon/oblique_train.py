@@ -91,6 +91,13 @@ class ObliqueConfig:
     tromso_active: float = 0.05     # целевая доля активных пикселей при растеризации снимков (pyon.tromso)
     cover: float = 0.7              # доля образцов со случайным ОКНОМ ПОКРЫТИЯ (вне окна нули — как на
                                     # реальном снимке, где поле уже нашей решётки)
+    init_from: str = ""             # инициализация весами ВЗ-модели, обученной на РЕАЛЬНЫХ ионограммах
+                                    # (перенос: признаки настоящего эха и помех сохраняются, меняется только
+                                    # голова классов; идея АХ 2026-09-07 против деградации переноса)
+    freeze_epochs: int = 0          # первые эпохи энкодер заморожен (учится только декодер и голова)
+    lr_head_mult: float = 1.0       # множитель шага для головы при переносе
+    adabn: bool = False             # перед оценкой подогнать статистики BatchNorm по РЕАЛЬНЫМ снимкам
+                                    # (AdaBN: адаптация к домену без меток)
     best_by: str = "val"            # критерий лучшего чекпойнта: "val" — медиана |ΔМПЧ| на синтетике;
                                     # "real" — гейт на реальных Тромсё минус 0.5·доля найденных F2 (без меток)
     density: str = "0.03,0.18"      # случайная целевая доля активных пикселей: синтетика проходит ТУ ЖЕ
@@ -119,6 +126,27 @@ def compose_target(yo: torch.Tensor, yx: torch.Tensor | None):
         return yo
     iX = obs.OB_CLASSES.index("X")
     return torch.where(yo > 0, yo, torch.where(yx > 0, torch.full_like(yo, iX), torch.zeros_like(yo)))
+
+
+@torch.no_grad()
+def adabn_update(net, dev, cfg, cache: dict, passes: int = 3):
+    """AdaBN — адаптация к домену без меток: прогнать РЕАЛЬНЫЕ снимки в режиме train(), чтобы скользящие
+    средние BatchNorm пересчитались по их статистике (веса не меняются). Дешёвый приём против сдвига
+    домена: синтетика и реальные снимки различаются средним и дисперсией активаций."""
+    if "X" not in cache:
+        tromso_probe(net, dev, cfg, cache=cache)          # заполнит кэш снимков
+    X = cache.get("X")
+    if X is None or not len(X):
+        return
+    was = net.training
+    net.train()
+    for m in net.modules():
+        if isinstance(m, torch.nn.BatchNorm2d):
+            m.reset_running_stats(); m.momentum = None     # накопительное среднее по всем показам
+    for _ in range(passes):
+        for k in range(0, len(X), 32):
+            net(X[k:k + 32].to(dev))
+    net.train(was)
 
 
 def _dens(cfg):
@@ -386,12 +414,22 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
     print(f"  панелей {len(Yi)}, суток-треков {len(day_sets)} при D={cfg.track_d:.0f}", flush=True)
 
     net = UNet(2, len(obs.OB_CLASSES), base=cfg.base, depth=cfg.depth).to(dev)
+    if cfg.init_from:                                  # перенос с ВЗ-модели, обученной на реальных данных
+        ck0 = torch.load(ROOT / cfg.init_from, map_location=dev)
+        sd0 = {k: v for k, v in ck0["state_dict"].items()
+               if not k.startswith(("head.", "prof."))}      # голова классов и голова профиля — свои
+        missing, unexpected = net.load_state_dict(sd0, strict=False)
+        print(f"  перенос из {cfg.init_from}: загружено {len(sd0)} тензоров, своих осталось {len(missing)} "
+              f"(голова {len(obs.OB_CLASSES)} классов), лишних {len(unexpected)}", flush=True)
     vz_net = None
     if cfg.vz_weights:
         ck = torch.load(ROOT / cfg.vz_weights, map_location=dev); c = ck["cfg"]
         vz_net = UNet(2, len(canon.CLASSES), base=c["base"], depth=c["depth"], profile=c.get("profile", False)).to(dev)
         vz_net.load_state_dict(ck["state_dict"])
-    opt = torch.optim.Adam(net.parameters(), cfg.lr)
+    head_p = [p_ for n_, p_ in net.named_parameters() if n_.startswith("head.")]
+    body_p = [p_ for n_, p_ in net.named_parameters() if not n_.startswith("head.")]
+    opt = torch.optim.Adam([{"params": body_p, "lr": cfg.lr},
+                            {"params": head_p, "lr": cfg.lr * cfg.lr_head_mult}])
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, cfg.epochs), eta_min=cfg.lr / 100) if cfg.sched == "cosine" else None
     scaler = torch.amp.GradScaler(enabled=(cfg.amp and dev.type == "cuda"))
     ce = nn.CrossEntropyLoss(weight=torch.tensor(CE_WEIGHTS, device=dev))
@@ -400,6 +438,10 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
     print(f"  U-Net {n_params(net)} параметров, вариант {cfg.variant}, рендерер {cfg.renderer}", flush=True)
     best = dict(value=float("inf"), epoch=-1); hist = []; tromso_cache: dict = {}
     for ep in range(cfg.epochs):
+        if cfg.init_from and cfg.freeze_epochs:        # заморозка энкодера на первых эпохах переноса
+            frozen = ep < cfg.freeze_epochs
+            for n_, p_ in net.named_parameters():
+                p_.requires_grad_(not (frozen and n_.startswith("down.")))
         net.train(); t_ep = time.time(); n_seen = 0; sums = {"CE": 0.0, "logic": 0.0}
         if sampler is not None:
             sampler.set_epoch(ep)
@@ -430,6 +472,8 @@ inv_ratio_pred_med vs inv_ratio_label_med — инвариант Пономар�
         t_ev = time.time()
         mv, pm, rt = evaluate(net, Xv, Yv_t if cfg.input_mode == 'ox' and tds is not None else Yv, Dv, M1, M2, dev, cfg, vocab, ep, log, ref_gate, vz_net)
         m.update(mv)
+        if cfg.adabn:                                     # AdaBN: пересчёт статистик BatchNorm по реальным снимкам
+            adabn_update(net, dev, cfg, tromso_cache)
         if cfg.tromso_n:                                  # реальные НЗ Тромсё без меток — критерий переноса
             m.update(tromso_probe(net, dev, cfg, vocab, do_gate=(ep % cfg.gate_every == 0 or ep == cfg.epochs - 1),
                                   cache=tromso_cache))
