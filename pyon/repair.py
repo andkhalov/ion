@@ -97,8 +97,8 @@ def evaluate_vertical(weights: str, manifest: str, n: int, workers: int = 3, dev
         rep.append(r); acts.append(act)
     rep = np.stack(rep)
     ct0 = T.char_table(pm, prof, sel); ct1 = T.char_table(rep, prof, sel)
-    out = {"n": len(pm), "flagged": float(np.mean(flags)), "repaired": float(np.mean([a is not None for a in acts])),
-           "time_s": time.time() - t0}
+    out = {"weights": str(weights), "n": len(pm), "flagged": float(np.mean(flags)),
+           "repaired": float(np.mean([a is not None for a in acts])), "time_s": time.time() - t0}
     for name in ("foF2", "foF1", "hF", "hF2", "MUF3000"):
         for tag, ct in (("before", ct0), ("after", ct1)):
             st = T.err_stats(ct[f"{name}_pred"], ct[f"{name}_artist"])
@@ -134,14 +134,17 @@ def evaluate_oblique(weights: str, dataset: str, n: int, renderer: str, dev="cud
     pm, _ = OT.predict(net, X, dev)
     vocab = vd.load_vocabulary()
     t0 = time.time()
-    _, _, flags0 = gates.gate_rate(pm, gates.oblique_scene, vocab, prefix="chk_", procs=3, with_warnings=True)
+    _, _, flags0, det = gates.gate_rate(pm, gates.oblique_scene, vocab, prefix="chk_", procs=3,
+                                        with_warnings=True, with_details=True)
     rep, acts, flags = [], [], list(map(bool, flags0))
     for i in range(len(pm)):
         r, act, _ = repair(pm[i], "oblique", vocab, name=f"o{i}", known_bad=flags[i])
         rep.append(r); acts.append(act)
     rep = np.stack(rep)
-    out = {"n": len(pm), "flagged": float(np.mean(flags)), "repaired": float(np.mean([a is not None for a in acts])),
-           "time_s": time.time() - t0}
+    from collections import Counter as _C
+    out = {"weights": str(weights), "n": len(pm), "flagged": float(np.mean(flags)),
+           "repaired": float(np.mean([a is not None for a in acts])), "time_s": time.time() - t0,
+           "shapes": dict(_C(sh for d in det for sh in set(d)))}
     from pyon import training as T
     for tag, m in (("before", pm), ("after", rep)):
         f1, f2, _ = OT.muf_readouts(m)
