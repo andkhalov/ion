@@ -116,3 +116,22 @@ def test_raster_polyline_thickness():
     assert g.any() and g[0, 0] and g[-1, -1]
     assert (g.sum(0) <= 4).all()                                     # ±1 по y → не толще 3–4
     assert not obs.raster_polyline([], [], 0, 1, 0, 1, 8).any()
+
+
+def test_anchor_parabolic_trace_and_nose():
+    """Привязка к прибору (Э4 §5.6): параболический след и независимый от модели отсчёт носа."""
+    import numpy as np
+    from pyon import anchor, oblique_synth as obs
+    fo, hm, y = 6.0, 300.0, 100.0
+    f, h = anchor.parabolic_trace(fo, hm, y)
+    assert f.max() < fo and np.all(np.diff(h) > 0)                 # h′ монотонно растёт к критической
+    assert abs(h[0] - (hm - y)) < 15                                # у нижней кромки h′ ≈ h₀ = hm − y
+    assert h[-1] > hm                                               # у критической h′ выше максимума слоя
+    for d_km, lo, hi in ((430.0, 1.05, 1.35), (1500.0, 1.9, 3.2)):  # секанс растёт с дальностью
+        assert lo <= obs.muf(f, h, d_km, 1, "spherical") / fo <= hi
+    x = np.zeros((2, len(obs.p_axis), len(obs.fob_axis)), np.uint8)
+    cov = np.ones(x.shape[1:], bool)
+    x[0, 40:44, 10:31] = 200                                        # связный отклик до колонки 30
+    x[0, 60:64, 60] = 200                                           # одиночная колонка — не след
+    assert abs(anchor.nose_readout(x, cov) - obs.fob_axis[30]) < 1e-9
+    assert np.isnan(anchor.nose_readout(np.zeros_like(x), cov))
