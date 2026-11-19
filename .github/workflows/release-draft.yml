@@ -1,7 +1,10 @@
 name: Prepare Zenodo release draft
 on:
+  workflow_dispatch:
   push:
-    tags: ['v1.0.0']
+    branches: [main]
+    paths: ['.github/workflows/release-draft.yml']
+concurrency: prepare-ion-v1-draft
 permissions: {}
 jobs:
   draft:
@@ -15,6 +18,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          if gh release view v1.0.0 >/dev/null 2>&1; then exit 0; fi
           gh release create v1.0.0 --verify-tag --draft \
             --title 'ion v1.0.0 — Ontology-guided ionogram interpretation' \
             --notes 'Research software and OWL/SHACL ontology for vertical and oblique ionograms. Includes Digisonde readers, oblique trace synthesis, segmentation training with differentiable physical constraints, and consistency checks. The full corpus and trained weights are not included. See CITATION.cff for citation metadata.'
