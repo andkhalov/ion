@@ -1,0 +1,20 @@
+name: Prepare Zenodo release draft
+on:
+  push:
+    tags: ['v1.0.0']
+permissions: {}
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Publishing (and hence the Zenodo webhook) is deliberately manual.
+      - name: Create draft for the verified tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create v1.0.0 --verify-tag --draft \
+            --title 'ion v1.0.0 — Ontology-guided ionogram interpretation' \
+            --notes 'Research software and OWL/SHACL ontology for vertical and oblique ionograms. Includes Digisonde readers, oblique trace synthesis, segmentation training with differentiable physical constraints, and consistency checks. The full corpus and trained weights are not included. See CITATION.cff for citation metadata.'

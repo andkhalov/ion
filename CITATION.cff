@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use the ion software or ontology, please cite this version."
+type: software
+title: "ion: Ontology-guided interpretation of vertical and oblique ionograms"
+version: "1.0.0"
+date-released: "2026-11-19"
+repository-code: "https://github.com/andkhalov/ion"
+authors:
+  - family-names: Schiriy
+    given-names: Andrey O.
+    orcid: "https://orcid.org/0000-0001-7312-4424"
+    affiliation: "Pushkov Institute of Terrestrial Magnetism, Ionosphere and Radio Wave Propagation, Russian Academy of Sciences (IZMIRAN)"
+    email: "andreyschiriy@gmail.com"
+  - family-names: Khalov
+    given-names: Andrey P.
+    orcid: "https://orcid.org/0009-0005-4584-8245"
+    affiliation: "Moscow Institute of Physics and Technology (MIPT); Federal Research Center Computer Science and Control, Russian Academy of Sciences"
+    email: "khalov.a@phystech.edu"
+  - family-names: Ataeva
+    given-names: Olga M.
+    orcid: "https://orcid.org/0000-0003-0367-5575"
+    affiliation: "Federal Research Center Computer Science and Control, Russian Academy of Sciences"
+    email: "oataeva@frccsc.ru"
+abstract: >-
+  Research software and OWL/SHACL ontology for interpreting ionospheric echoes.
+  The repository contains routines for reading Digisonde ionograms, synthesizing
+  oblique traces, training segmentation networks with physical constraints and
+  checking the consistency of predicted modes. It includes ontology test scenes;
+  the full sounding corpus and trained network weights are not bundled.
+keywords:
+  - ionogram
+  - oblique sounding
+  - ontology
+  - semantic segmentation
+  - SHACL
